@@ -65,7 +65,7 @@ graph TB
         BUS["Event Bus<br/>(Kafka, NATS, RabbitMQ)"]
     end
     
-    subgraph Mem["Unified Memory & Knowledge Substrate"]
+    subgraph Mem["Unified Memory Substrate"]
         VEC["Vector Index<br/>(Semantic Embeddings<br/>+ Metadata Filters)"]
         GRA["Knowledge Graph<br/>(Symbols, Decisions,<br/>Dependencies)"]
         AUD["Temporal Audit Log<br/>(Changesets, Provenance,<br/>Signatures)"]
@@ -88,11 +88,11 @@ graph TB
     Ingest -->|Index, Normalize| Mem
     Mem -->|Persist| Storage
     
-    style Agents fill:#e1f5ff
-    style Connect fill:#fff3e0
-    style Mem fill:#f3e5f5
-    style Ingest fill:#e8f5e9
-    style Storage fill:#fce4ec
+    style Agents fill:#e1f5ff,color:black
+    style Connect fill:#fff3e0,color:black
+    style Mem fill:#f3e5f5,color:black
+    style Ingest fill:#e8f5e9,color:black
+    style Storage fill:#fce4ec,color:black
 ```
 
 ### 2.2 System Plane Descriptions
@@ -192,12 +192,12 @@ graph LR
     Symbol -->|depends_on| Symbol
     Symbol -->|exported from| Symbol
     
-    style Run fill:#e3f2fd
-    style Decision fill:#f3e5f5
-    style ChangeSet fill:#fff3e0
-    style Symbol fill:#e8f5e9
-    style Policy fill:#fce4ec
-    style AuditLog fill:#ede7f6
+    style Run fill:#e3f2fd,color:black
+    style Decision fill:#f3e5f5,color:black
+    style ChangeSet fill:#fff3e0,color:black
+    style Symbol fill:#e8f5e9,color:black
+    style Policy fill:#fce4ec,color:black
+    style AuditLog fill:#ede7f6,color:black
 ```
 
 ### 4.3 Hybrid Retrieval Strategy
@@ -365,18 +365,18 @@ graph TD
     J -.->|Resolved| L
     K -.->|Pending| L
     
-    style A fill:#e3f2fd
-    style B fill:#e3f2fd
-    style C fill:#fff3e0
-    style D fill:#fff3e0
-    style E fill:#f3e5f5
-    style F fill:#c8e6c9
-    style G fill:#c8e6c9
-    style H fill:#ffccbc
-    style I fill:#c8e6c9
-    style J fill:#c8e6c9
-    style K fill:#ffccbc
-    style L fill:#e8f5e9
+    style A fill:#e3f2fd,color:black
+    style B fill:#e3f2fd,color:black
+    style C fill:#fff3e0,color:black
+    style D fill:#fff3e0,color:black
+    style E fill:#f3e5f5,color:black
+    style F fill:#c8e6c9,color:black
+    style G fill:#c8e6c9,color:black
+    style H fill:#ffccbc,color:black
+    style I fill:#c8e6c9,color:black
+    style J fill:#c8e6c9,color:black
+    style K fill:#ffccbc,color:black
+    style L fill:#e8f5e9,color:black
 ```
 
 ---
@@ -447,14 +447,14 @@ flowchart LR
     Validation -->|write| MemWrite
     Validation -->|fail| Deny
     
-    style Agent fill:#e1f5ff
-    style Auth fill:#fff3e0
-    style AuthZ fill:#fff3e0
-    style Policies fill:#fff3e0
-    style Validation fill:#fff3e0
-    style MemAccess fill:#c8e6c9
-    style MemWrite fill:#c8e6c9
-    style Deny fill:#ffccbc
+    style Agent fill:#e1f5ff,color:black
+    style Auth fill:#fff3e0,color:black
+    style AuthZ fill:#fff3e0,color:black
+    style Policies fill:#fff3e0,color:black
+    style Validation fill:#fff3e0,color:black
+    style MemAccess fill:#c8e6c9,color:black
+    style MemWrite fill:#c8e6c9,color:black
+    style Deny fill:#ffccbc,color:black
 ```
 
 ---
@@ -464,32 +464,26 @@ flowchart LR
 The following phased approach balances early value delivery with sustainable architecture.
 
 ### Phase 0: Specification & Data Model Definition
-- **Duration**: 2-3 weeks
 - **Deliverables**: Canonical object model (Symbols, Decisions, ChangeSets, Runs, Policies) in OpenAPI/JSON Schema format. Define versioning strategy.
 - **Success Criteria**: Stakeholder alignment on data model; clear examples of how each object type solves real agent coordination problems.
 
 ### Phase 1: Ingestion & Baseline Indexing
-- **Duration**: 4-6 weeks
 - **Deliverables**: Tree-sitter or LSIF-based AST parsing; git integration for diffs and blame; embeddings pipeline (chunking, model selection, vector DB setup).
 - **Success Criteria**: Ability to index a 100k-line codebase in <5 minutes; semantic search functional for code snippets and documentation.
 
 ### Phase 2: Agent Protocol & MCP Exposure
-- **Duration**: 4-6 weeks
 - **Deliverables**: Agent Protocol implementation (runs, threads, store endpoints); MCP server exposing memory tools (search, store, retrieve, write-decision).
 - **Success Criteria**: At least two independent agent implementations successfully integrate via MCP; documented API contract.
 
 ### Phase 3: Knowledge Graph & Temporal Queries
-- **Duration**: 6-8 weeks
 - **Deliverables**: Symbol graph construction (files, functions, classes, dependencies); decision-to-changeset linking; temporal audit log with time-windowed queries.
 - **Success Criteria**: Graph traversal queries complete in <500ms; audit replay enables deterministic reproduction of agent decisions.
 
 ### Phase 4: Coordination Primitives & Conflict Resolution
-- **Duration**: 4-6 weeks
 - **Deliverables**: Lease/lock manager with TTL and deadlock detection; conflict detection algorithm; pub/sub event bus integration.
 - **Success Criteria**: Parallel agents (2-4 concurrent) can execute without data corruption; conflicts detected and surfaced for resolution within 1 second.
 
 ### Phase 5: Enterprise Controls & Observability
-- **Duration**: 6-8 weeks
 - **Deliverables**: OIDC/SAML authentication; RBAC/ABAC authorization; encryption at rest and in transit; observability dashboards (agent activity, memory hit rates, conflict frequency).
 - **Success Criteria**: Full audit trail captured for compliance; role-based access controls tested across multiple identities; performance metrics track p95 latency, throughput, and error rates.
 
@@ -558,32 +552,32 @@ graph TB
     CoreSubs -->|Persist| PersistStore
     Ingest -->|Index| CoreSubs
     
-    style Agents fill:#e1f5ff
-    style PublicAPI fill:#fff3e0
-    style MemOrch fill:#f3e5f5
-    style CoreSubs fill:#e8f5e9
-    style PersistStore fill:#fce4ec
-    style Ingest fill:#fff9c4
+    style Agents fill:#e1f5ff,color:black
+    style PublicAPI fill:#fff3e0,color:black
+    style MemOrch fill:#f3e5f5,color:black
+    style CoreSubs fill:#e8f5e9,color:black
+    style PersistStore fill:#fce4ec,color:black
+    style Ingest fill:#fff9c4,color:black
 ```
 
 ### Implementation Checklist
 
-**Immediately** (Weeks 1-2):
+**Immediately**:
 - [ ] Finalize canonical data model and obtain stakeholder sign-off.
 - [ ] Select vector database (Pinecone, Weaviate, Qdrant) and graph database (Neo4j, ArangoDB).
 - [ ] Design schema for Mem0 integration.
 
-**Near-term** (Weeks 3-6):
+**Near-term**:
 - [ ] Implement Phase 0-1 (specification and ingestion).
 - [ ] Stand up MCP server with mock endpoints.
 - [ ] Develop proof-of-concept integration with one agent platform.
 
-**Medium-term** (Weeks 7-12):
+**Medium-term**:
 - [ ] Complete Phase 2-3 (Agent Protocol, knowledge graph).
 - [ ] Conduct performance benchmarks; optimize slow paths.
 - [ ] Document API contracts and agent integration guide.
 
-**Long-term** (Weeks 13-20):
+**Long-term**:
 - [ ] Implement Phase 4-5 (coordination, enterprise controls).
 - [ ] Run pilot with internal teams; gather feedback.
 - [ ] Productionize; prepare for external agent ecosystem.
