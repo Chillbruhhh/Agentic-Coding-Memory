@@ -6,8 +6,8 @@ This repository contains white papers on a unified agentic memory layer designed
 
 ## Documents
 
-- `Unified_Agentic_Memory_White_Paper_v2.md`: Main white paper (Version 2.0, January 2026) detailing the architecture, protocols, and implementation roadmap.
-- `Unified_Agentic_Memory_Deep_Research_White_Paper.pdf`: research version
+- [Unified_Agentic_Memory_White_Paper.pdf](Unified_Agentic_Memory_White_Paper.pdf): Main white paper PDF version
+- [Unified_Agentic_Memory_White_Paper-Detail.md](Unified_Agentic_Memory_White_Paper-Detail.md): Detailed Markdown version with full technical details
 
 ## Key Components
 
