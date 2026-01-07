@@ -58,7 +58,7 @@ graph TB
         A3["Cloud Services<br/>(Cloud Sandboxes)"]
     end
     
-    subgraph Connect["Connectivity & Coordination Layer"]
+    subgraph Connect["Connectivity Layer"]
         AP["Agent Protocol<br/>(Runs, Threads, Store)"]
         A2A["Agent2Agent Gateway<br/>(Discovery, Task Exchange)"]
         MCP["MCP Servers<br/>(Tools & Resources)"]
@@ -291,6 +291,7 @@ Agents subscribe to events ("Symbol X was modified," "Lock released on module Y,
 ### 6.2 Lock/Lease Workflow
 
 ```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'textColor': '#000000'}}}%%
 sequenceDiagram
     participant A as "Agent A"
     participant M as "Unified Memory"
