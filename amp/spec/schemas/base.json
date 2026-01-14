@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AMP Base Object",
+  "type": "object",
+  "required": ["id", "type", "tenant_id", "project_id", "created_at", "updated_at", "provenance"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique identifier for the object"
+    },
+    "type": {
+      "type": "string",
+      "enum": ["symbol", "decision", "changeset", "run"],
+      "description": "Type of memory object"
+    },
+    "tenant_id": {
+      "type": "string",
+      "description": "Tenant identifier for multi-tenancy"
+    },
+    "project_id": {
+      "type": "string",
+      "description": "Project identifier"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Creation timestamp"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Last update timestamp"
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["agent", "summary"],
+      "properties": {
+        "agent": {
+          "type": "string",
+          "description": "Agent that created this object"
+        },
+        "model": {
+          "type": "string",
+          "description": "AI model used (if applicable)"
+        },
+        "tools": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Tools used in creation"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Brief summary of creation context"
+        }
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type", "target"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "description": "Type of relationship"
+          },
+          "target": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Target object ID"
+          }
+        }
+      },
+      "description": "Relationships to other objects"
+    },
+    "embedding": {
+      "type": "array",
+      "items": {"type": "number"},
+      "description": "Vector embedding for semantic search"
+    }
+  }
+}

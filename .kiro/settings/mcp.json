@@ -1,0 +1,21 @@
+{
+  "mcpServers": {
+    "mcp-portal": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "http://localhost:8020/api/v1/mcp-http",
+        "--allow-http"
+      ]
+    },
+    "Archon": {
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8051/mcp",
+        "--allow-http"
+      ]
+    }
+  }
+}

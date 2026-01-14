@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Symbol",
+  "allOf": [
+    {"$ref": "base.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "symbol"},
+        "name": {
+          "type": "string",
+          "description": "Symbol name"
+        },
+        "kind": {
+          "type": "string",
+          "enum": ["file", "module", "class", "function", "variable", "type"],
+          "description": "Kind of symbol"
+        },
+        "path": {
+          "type": "string",
+          "description": "File path or location"
+        },
+        "language": {
+          "type": "string",
+          "description": "Programming language"
+        },
+        "content_hash": {
+          "type": "string",
+          "description": "Hash of symbol content"
+        },
+        "signature": {
+          "type": "string",
+          "description": "Function/method signature"
+        },
+        "documentation": {
+          "type": "string",
+          "description": "Documentation or comments"
+        }
+      },
+      "required": ["name", "kind", "path", "language"]
+    }
+  ]
+}

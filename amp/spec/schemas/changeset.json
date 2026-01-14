@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ChangeSet",
+  "allOf": [
+    {"$ref": "base.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "changeset"},
+        "title": {
+          "type": "string",
+          "description": "Changeset title"
+        },
+        "description": {
+          "type": "string",
+          "description": "Detailed description of changes"
+        },
+        "diff": {
+          "type": "string",
+          "description": "Git diff or change description"
+        },
+        "files_changed": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "List of files modified"
+        },
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "status": {
+                "type": "string",
+                "enum": ["passed", "failed", "skipped"]
+              },
+              "output": {"type": "string"}
+            },
+            "required": ["name", "status"]
+          },
+          "description": "Test results"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "review", "approved", "merged", "rejected"],
+          "description": "Changeset status"
+        },
+        "commit_hash": {
+          "type": "string",
+          "description": "Git commit hash"
+        }
+      },
+      "required": ["title", "files_changed", "status"]
+    }
+  ]
+}

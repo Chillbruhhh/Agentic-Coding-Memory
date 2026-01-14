@@ -1,0 +1,582 @@
+openapi: 3.0.3
+info:
+  title: Agent Memory Protocol (AMP) API
+  description: A vendor-neutral protocol for durable, unified memory in agentic software development
+  version: 1.0.0
+  contact:
+    name: AMP Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080/v1
+    description: Local development server
+
+paths:
+  /objects:
+    post:
+      summary: Create a single object
+      operationId: createObject
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/Symbol'
+                - $ref: '#/components/schemas/Decision'
+                - $ref: '#/components/schemas/ChangeSet'
+                - $ref: '#/components/schemas/Run'
+      responses:
+        '201':
+          description: Object created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ObjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /objects:batch:
+    post:
+      summary: Create multiple objects
+      operationId: createObjectsBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                oneOf:
+                  - $ref: '#/components/schemas/Symbol'
+                  - $ref: '#/components/schemas/Decision'
+                  - $ref: '#/components/schemas/ChangeSet'
+                  - $ref: '#/components/schemas/Run'
+      responses:
+        '201':
+          description: Objects created successfully
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ObjectResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /objects/{id}:
+    get:
+      summary: Get object by ID
+      operationId: getObject
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Object retrieved successfully
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Symbol'
+                  - $ref: '#/components/schemas/Decision'
+                  - $ref: '#/components/schemas/ChangeSet'
+                  - $ref: '#/components/schemas/Run'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /query:
+    post:
+      summary: Hybrid query with vector, graph, and temporal search
+      operationId: query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QueryRequest'
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /trace/{id}:
+    get:
+      summary: Get query trace for deterministic traceability
+      operationId: getTrace
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Trace retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TraceResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /leases:acquire:
+    post:
+      summary: Acquire a coordination lease
+      operationId: acquireLease
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LeaseRequest'
+      responses:
+        '201':
+          description: Lease acquired
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeaseResponse'
+        '409':
+          description: Lease already held
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /leases:release:
+    post:
+      summary: Release a coordination lease
+      operationId: releaseLease
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lease_id]
+              properties:
+                lease_id:
+                  type: string
+                  format: uuid
+      responses:
+        '200':
+          description: Lease released
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  schemas:
+    BaseObject:
+      type: object
+      required: [id, type, tenant_id, project_id, created_at, updated_at, provenance]
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [symbol, decision, changeset, run]
+        tenant_id:
+          type: string
+        project_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        provenance:
+          $ref: '#/components/schemas/Provenance'
+        links:
+          type: array
+          items:
+            $ref: '#/components/schemas/Link'
+        embedding:
+          type: array
+          items:
+            type: number
+
+    Provenance:
+      type: object
+      required: [agent, summary]
+      properties:
+        agent:
+          type: string
+        model:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        summary:
+          type: string
+
+    Link:
+      type: object
+      required: [type, target]
+      properties:
+        type:
+          type: string
+        target:
+          type: string
+          format: uuid
+
+    Symbol:
+      allOf:
+        - $ref: '#/components/schemas/BaseObject'
+        - type: object
+          required: [name, kind, path, language]
+          properties:
+            type:
+              type: string
+              enum: [symbol]
+            name:
+              type: string
+            kind:
+              type: string
+              enum: [file, module, class, function, variable, type]
+            path:
+              type: string
+            language:
+              type: string
+            content_hash:
+              type: string
+            signature:
+              type: string
+            documentation:
+              type: string
+
+    Decision:
+      allOf:
+        - $ref: '#/components/schemas/BaseObject'
+        - type: object
+          required: [title, problem, rationale, outcome]
+          properties:
+            type:
+              type: string
+              enum: [decision]
+            title:
+              type: string
+            problem:
+              type: string
+            options:
+              type: array
+              items:
+                $ref: '#/components/schemas/DecisionOption'
+            rationale:
+              type: string
+            outcome:
+              type: string
+            status:
+              type: string
+              enum: [proposed, accepted, rejected, superseded]
+
+    DecisionOption:
+      type: object
+      required: [name, description]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        pros:
+          type: array
+          items:
+            type: string
+        cons:
+          type: array
+          items:
+            type: string
+
+    ChangeSet:
+      allOf:
+        - $ref: '#/components/schemas/BaseObject'
+        - type: object
+          required: [title, files_changed, status]
+          properties:
+            type:
+              type: string
+              enum: [changeset]
+            title:
+              type: string
+            description:
+              type: string
+            diff:
+              type: string
+            files_changed:
+              type: array
+              items:
+                type: string
+            tests:
+              type: array
+              items:
+                $ref: '#/components/schemas/TestResult'
+            status:
+              type: string
+              enum: [draft, review, approved, merged, rejected]
+            commit_hash:
+              type: string
+
+    TestResult:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+        status:
+          type: string
+          enum: [passed, failed, skipped]
+        output:
+          type: string
+
+    Run:
+      allOf:
+        - $ref: '#/components/schemas/BaseObject'
+        - type: object
+          required: [input_summary, status]
+          properties:
+            type:
+              type: string
+              enum: [run]
+            input_summary:
+              type: string
+            outputs:
+              type: array
+              items:
+                $ref: '#/components/schemas/RunOutput'
+            errors:
+              type: array
+              items:
+                $ref: '#/components/schemas/RunError'
+            confidence:
+              type: number
+              minimum: 0
+              maximum: 1
+            duration_ms:
+              type: integer
+            status:
+              type: string
+              enum: [running, completed, failed, cancelled]
+
+    RunOutput:
+      type: object
+      required: [type, content]
+      properties:
+        type:
+          type: string
+          enum: [file, command, response, artifact]
+        content:
+          type: string
+        metadata:
+          type: object
+
+    RunError:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+        context:
+          type: object
+
+    QueryRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          description: Text query for semantic search
+        vector:
+          type: array
+          items:
+            type: number
+          description: Vector for similarity search
+        filters:
+          type: object
+          properties:
+            type:
+              type: array
+              items:
+                type: string
+                enum: [symbol, decision, changeset, run]
+            project_id:
+              type: string
+            tenant_id:
+              type: string
+            created_after:
+              type: string
+              format: date-time
+            created_before:
+              type: string
+              format: date-time
+        graph:
+          type: object
+          properties:
+            start_nodes:
+              type: array
+              items:
+                type: string
+                format: uuid
+            relation_types:
+              type: array
+              items:
+                type: string
+            max_depth:
+              type: integer
+              default: 3
+        limit:
+          type: integer
+          default: 10
+          maximum: 100
+
+    QueryResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryResult'
+        trace_id:
+          type: string
+          format: uuid
+        total_count:
+          type: integer
+        execution_time_ms:
+          type: integer
+
+    QueryResult:
+      type: object
+      properties:
+        object:
+          oneOf:
+            - $ref: '#/components/schemas/Symbol'
+            - $ref: '#/components/schemas/Decision'
+            - $ref: '#/components/schemas/ChangeSet'
+            - $ref: '#/components/schemas/Run'
+        score:
+          type: number
+          description: Relevance score
+        explanation:
+          type: string
+          description: Why this result was returned
+
+    TraceResponse:
+      type: object
+      properties:
+        trace_id:
+          type: string
+          format: uuid
+        query:
+          $ref: '#/components/schemas/QueryRequest'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceStep'
+        total_time_ms:
+          type: integer
+
+    TraceStep:
+      type: object
+      properties:
+        step:
+          type: string
+        description:
+          type: string
+        time_ms:
+          type: integer
+        results_count:
+          type: integer
+
+    LeaseRequest:
+      type: object
+      required: [resource, holder]
+      properties:
+        resource:
+          type: string
+          description: Resource identifier
+        holder:
+          type: string
+          description: Agent holding the lease
+        ttl_seconds:
+          type: integer
+          default: 300
+          description: Lease time-to-live
+
+    LeaseResponse:
+      type: object
+      properties:
+        lease_id:
+          type: string
+          format: uuid
+        resource:
+          type: string
+        holder:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+
+    ObjectResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

@@ -1,0 +1,55 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Decision",
+  "allOf": [
+    {"$ref": "base.json"},
+    {
+      "type": "object",
+      "properties": {
+        "type": {"const": "decision"},
+        "title": {
+          "type": "string",
+          "description": "Decision title"
+        },
+        "problem": {
+          "type": "string",
+          "description": "Problem being solved"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "description": {"type": "string"},
+              "pros": {
+                "type": "array",
+                "items": {"type": "string"}
+              },
+              "cons": {
+                "type": "array",
+                "items": {"type": "string"}
+              }
+            },
+            "required": ["name", "description"]
+          },
+          "description": "Available options considered"
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Reasoning for chosen option"
+        },
+        "outcome": {
+          "type": "string",
+          "description": "Selected option"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["proposed", "accepted", "rejected", "superseded"],
+          "description": "Decision status"
+        }
+      },
+      "required": ["title", "problem", "rationale", "outcome"]
+    }
+  ]
+}
