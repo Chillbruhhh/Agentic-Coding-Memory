@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 AMP Python SDK Example
-Demonstrates basic usage of the Agent Memory Protocol client.
+Demonstrates basic usage of the Agentic Memory Protocol client.
 """
 
 import asyncio

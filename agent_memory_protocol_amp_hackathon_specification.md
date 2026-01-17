@@ -1,4 +1,4 @@
-# Agent Memory Protocol (AMP)
+# Agentic Memory Protocol (AMP)
 
 **A Vendor-Neutral Protocol for Durable, Unified Memory in Agentic Software Development**
 
@@ -15,7 +15,7 @@ Modern coding agents (Cursor, Claude Code, Codex, custom CLI agents, automation 
 - What changed over time
 - What context should guide future actions
 
-**Agent Memory Protocol (AMP)** defines a language-neutral contract that allows any agent to persist, retrieve, and reason over structured project memory using a unified memory substrate.
+**Agentic Memory Protocol (AMP)** defines a language-neutral contract that allows any agent to persist, retrieve, and reason over structured project memory using a unified memory substrate.
 
 AMP is:
 

@@ -1,7 +1,7 @@
 # Product Overview
 
 ## Product Purpose
-Agent Memory Protocol (AMP) is a vendor-neutral protocol for durable, unified memory in agentic software development. AMP solves the critical problem of coding agents operating in isolation without shared memory of codebase structure, decisions made, changes over time, and context that should guide future actions. By providing a standardized memory substrate, AMP enables any agent to persist, retrieve, and reason over structured project memory using hybrid retrieval methods.
+Agentic Memory Protocol (AMP) is a vendor-neutral protocol for durable, unified memory in agentic software development. AMP solves the critical problem of coding agents operating in isolation without shared memory of codebase structure, decisions made, changes over time, and context that should guide future actions. By providing a standardized memory substrate, AMP enables any agent to persist, retrieve, and reason over structured project memory using hybrid retrieval methods.
 
 ## Target Users
 **Primary Users**: Developers building AI agents and coding automation systems

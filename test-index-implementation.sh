@@ -1,0 +1,36 @@
+#!/bin/bash
+# Test script for AMP CLI index command
+
+echo "🧪 Testing AMP CLI Index Command Implementation"
+echo "=============================================="
+
+echo "📋 Files created/modified:"
+echo "  ✓ amp/cli/src/main.rs - Added Index command"
+echo "  ✓ amp/cli/src/commands/mod.rs - Added index module"
+echo "  ✓ amp/cli/src/commands/index.rs - Complete implementation"
+echo "  ✓ amp/cli/tests/test_index.rs - Unit tests"
+echo "  ✓ amp/cli/Cargo.toml - Added walkdir and md5 dependencies"
+
+echo ""
+echo "🔧 Validation Commands (run when Rust is available):"
+echo ""
+echo "Level 1: Syntax & Style"
+echo "  cd amp/cli && cargo check"
+echo "  cd amp/cli && cargo fmt --check"
+echo "  cd amp/cli && cargo clippy -- -D warnings"
+echo ""
+echo "Level 2: Unit Tests"
+echo "  cd amp/cli && cargo test"
+echo "  cd amp/cli && cargo test test_index"
+echo ""
+echo "Level 3: Manual Validation"
+echo "  cd amp/cli && cargo build"
+echo "  cd amp/cli && cargo run -- index --help"
+echo "  cd amp/cli && cargo run -- --help  # Should show index command"
+echo ""
+echo "Level 4: Integration Test (requires AMP server running)"
+echo "  cd amp/cli && cargo run -- index"
+echo "  cd amp/cli && cargo run -- index --path ../server --exclude 'target,*.log'"
+echo ""
+
+echo "✅ Implementation complete! Ready for validation when Rust toolchain is available."

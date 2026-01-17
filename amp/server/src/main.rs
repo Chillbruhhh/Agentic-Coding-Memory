@@ -147,6 +147,12 @@ fn api_routes() -> Router<AppState> {
         .route("/relationships", post(handlers::relationships::create_relationship))
         .route("/relationships", get(handlers::relationships::get_relationships))
         .route("/relationships/:type/:id", delete(handlers::relationships::delete_relationship))
+        // Codebase parsing endpoints
+        .route("/codebase/parse", post(handlers::codebase::parse_codebase))
+        .route("/codebase/parse-file", post(handlers::codebase::parse_file))
+        .route("/codebase/file-logs", get(handlers::codebase::get_file_logs))
+        .route("/codebase/file-logs/:path", get(handlers::codebase::get_file_log))
+        .route("/codebase/update-file-log", post(handlers::codebase::update_file_log))
 }
 
 async fn health_check() -> Result<Json<serde_json::Value>, StatusCode> {

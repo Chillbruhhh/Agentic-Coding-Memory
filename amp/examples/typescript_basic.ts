@@ -1,6 +1,6 @@
 /**
  * AMP TypeScript SDK Example
- * Demonstrates basic usage of the Agent Memory Protocol client.
+ * Demonstrates basic usage of the Agentic Memory Protocol client.
  */
 
 import { v4 as uuidv4 } from 'uuid';

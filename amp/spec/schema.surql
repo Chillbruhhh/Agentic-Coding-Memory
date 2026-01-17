@@ -1,5 +1,5 @@
 -- AMP SurrealDB Schema
--- Agent Memory Protocol database schema with tables, relations, and indexes
+-- Agentic Memory Protocol database schema with tables, relations, and indexes
 
 -- Base table for all objects
 DEFINE TABLE objects SCHEMALESS;

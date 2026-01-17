@@ -1,4 +1,4 @@
-# Agent Memory Protocol (AMP)
+# Agentic Memory Protocol (AMP)
 
 ## Overview
 
@@ -46,6 +46,14 @@ ACM/
 - Create single objects (POST /v1/objects)
 - Batch create with detailed status (POST /v1/objects/batch)
 - Retrieve by ID (GET /v1/objects/{id})
+
+✅ **Codebase Parser** (NEW)
+- Tree-sitter based parsing for Python and TypeScript
+- Symbol extraction (functions, classes, interfaces, variables)
+- Dependency analysis (imports/exports)
+- Structured file logs optimized for embeddings
+- Change tracking with links to AMP objects
+- Content hash-based change detection
 
 ✅ **Memory Object Types**
 - Symbol (code structure)

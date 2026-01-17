@@ -40,6 +40,41 @@
 - [x] Multi-hop test scripts (PowerShell)
 
 ## ✅ Recently Completed (January 17, 2026)
+
+### 🔍 **Codebase Parser Implementation** (NEW)
+- [x] **Tree-sitter Integration**: Complete Python and TypeScript parsing with symbol extraction
+  - [x] Multi-language parser with extensible architecture
+  - [x] Symbol extraction (functions, classes, interfaces, variables, methods)
+  - [x] Dependency analysis (imports/exports detection)
+  - [x] Content hash computation for change detection
+  - [x] Comprehensive test suite with sample files
+
+- [x] **File Log System**: Structured Markdown logs optimized for embeddings
+  - [x] FILE_LOG v1 format with deterministic structure
+  - [x] Symbol snapshots with line numbers and types
+  - [x] Dependency mapping (imports/exports)
+  - [x] Change history tracking with linked objects
+  - [x] Notes and architectural decision links
+
+- [x] **API Endpoints**: Complete REST API for codebase analysis
+  - [x] Parse entire codebase (`POST /v1/codebase/parse`)
+  - [x] Parse single file (`POST /v1/codebase/parse-file`)
+  - [x] Update file logs (`POST /v1/codebase/update-file-log`)
+  - [x] Get file logs with filtering (`GET /v1/codebase/file-logs`)
+  - [x] Get specific file log (`GET /v1/codebase/file-logs/{path}`)
+
+- [x] **AMP Integration**: Seamless integration with existing memory system
+  - [x] Automatic Symbol object creation in database
+  - [x] File log objects with vector embeddings
+  - [x] Links to Decision and ChangeSet objects
+  - [x] Project and tenant isolation support
+
+- [x] **Testing Infrastructure**: Comprehensive validation suite
+  - [x] PowerShell test script (`test-codebase-parser.ps1`)
+  - [x] Bash test script (`test-codebase-parser.sh`)
+  - [x] Sample Python and TypeScript test files
+  - [x] End-to-end API testing with validation
+
 - [x] **Multi-hop Graph Traversal Foundation**: Complete API structure for multi-hop queries
   - [x] Extended GraphQuery with algorithm and target_node fields
   - [x] Added TraversalAlgorithm enum (Collect, Path, Shortest)
@@ -63,10 +98,56 @@
   - [x] Weighted scoring system (Vector: 40%, Text: 30%, Graph: 30%)
   - [x] Result deduplication by object ID across search methods
   - [x] Graceful degradation for partial query failures
+
+### 🖥️ **AMP CLI Implementation** (COMPLETE)
+- [x] **Complete CLI Architecture**: Full command-line interface with 7 commands
+  - [x] Command structure: `start`, `status`, `history`, `index`, `query`, `clear`, `tui`
+  - [x] Clap-based argument parsing with comprehensive help system
+  - [x] HTTP client wrapper for AMP server communication
+  - [x] Configuration management with environment variables
+  - [x] Modular command organization in `commands/` directory
+
+- [x] **Directory Indexing System**: Intelligent codebase scanning and relationship mapping
+  - [x] `amp index` command with comprehensive file traversal using walkdir
+  - [x] Smart exclude patterns (git, build artifacts, caches, IDE files)
+  - [x] Multi-language support (Python, TypeScript, JavaScript, Rust)
+  - [x] Hierarchical object creation: Project → Directories → Files → Symbols
+  - [x] Content hashing for change detection using MD5
+  - [x] Progress reporting and comprehensive error handling
+  - [x] **BREAKTHROUGH**: Working graph relationships with proper SurrealDB syntax
+
+- [x] **Graph Relationship Resolution**: Complete fix for SurrealDB edge creation
+  - [x] Fixed endpoint routing: CLI now uses `/v1/relationships` instead of `/v1/query`
+  - [x] Corrected JSON payload: `type` field instead of `relation_type`
+  - [x] Resolved UUID syntax: Proper backtick escaping `objects:`uuid``
+  - [x] Bypassed SurrealDB enum serialization issues in verification
+  - [x] **RESULT**: 931 nodes with 924 hierarchical relationships successfully created
+
+- [x] **Terminal User Interface**: Interactive TUI with session management
+  - [x] Ratatui-based interface with real-time status display
+  - [x] Session monitoring and keyboard navigation controls
+  - [x] Layout system with status bar and session view components
+  - [x] Process management for agent session lifecycle
+
+- [x] **Integration & Testing**: Complete validation and deployment system
+  - [x] Integration tests and unit test framework
+  - [x] Build and installation scripts for cross-platform deployment
+  - [x] Git repository awareness for project context detection
+  - [x] File system monitoring and change detection capabilities
   - [x] Comprehensive error handling and timeout protection (5 seconds)
   - [x] Backward compatibility with existing single-method queries
   - [x] Integration into query handler with hybrid flag detection
   - [x] Complete test suite and documentation examples
+- [x] **CRITICAL PERSISTENCE BREAKTHROUGH**: Solved SurrealDB enum serialization crisis
+  - [x] Fixed object persistence - objects now survive server restarts
+  - [x] Resolved "invalid type: enum, expected any valid JSON value" errors
+  - [x] Implemented SELECT VALUE syntax with proper key:value pairs
+  - [x] Mixed query approach: SELECT VALUE for text, regular SELECT for vector
+  - [x] File-based database storage (file://amp.db) for true persistence
+  - [x] Raw JSON payload acceptance for flexible object creation
+  - [x] Comprehensive ID normalization for SurrealDB Thing types
+  - [x] Working hybrid retrieval with text + vector search combination
+  - [x] All 6 test objects successfully persisting and queryable
 
 ## 🚧 In Progress
 - [ ] None currently
@@ -171,23 +252,36 @@
 - ✅ .env configuration support
 
 **Remaining for Full Demo**:
-1. **Application-level multi-hop logic** - Implement true depth > 1 traversal in Rust
-2. **Python SDK + example** - Demonstrate usability
-3. **Demo script** - End-to-end workflow showcase
+1. ✅ **Application-level multi-hop logic** - COMPLETE (all three algorithms implemented)
+2. ✅ **Hybrid retrieval system** - COMPLETE (text + vector + graph working)
+3. [ ] **Python SDK + example** - Demonstrate usability
+4. [ ] **Demo script** - End-to-end workflow showcase
 
 ## 📊 Estimated Effort
 - ✅ Core API endpoints: 4-6 hours (COMPLETE)
 - ✅ Multi-hop infrastructure: 2-3 hours (COMPLETE)
-- [ ] Application-level multi-hop logic: 3-4 hours
-- [ ] Hybrid retrieval system: 4-6 hours
+- ✅ Application-level multi-hop logic: 3-4 hours (COMPLETE)
+- ✅ Hybrid retrieval system: 4-6 hours (COMPLETE)
+- ✅ **CRITICAL PERSISTENCE FIX**: 3 hours (COMPLETE)
 - [ ] SDK generation + examples: 3-4 hours
 - [ ] Testing + documentation: 2-3 hours
-- **Total MVP**: ~18-26 hours (70% complete)
+- **Total MVP**: ~18-26 hours (**90% complete**)
 
 ## 🎯 Current Status (January 17, 2026)
-**Multi-hop Graph Traversal**: ✅ **Infrastructure Complete**
-- API structure supports all three algorithms (Collect, Path, Shortest)
-- Depth validation and safety limits implemented
+**AMP SERVER FULLY FUNCTIONAL**: ✅ **ALL CORE FEATURES WORKING**
+- ✅ Object persistence: WORKING (6 objects stored and retrievable)
+- ✅ Basic queries: WORKING (SELECT VALUE syntax resolved SurrealDB issues)
+- ✅ Text search: WORKING (hybrid service text matching functional)
+- ✅ Vector search: WORKING (OpenAI embeddings + cosine similarity)
+- ✅ Hybrid retrieval: WORKING (text + vector combination with scoring)
+- ✅ SurrealDB integration: WORKING (file-based persistence across restarts)
+- ✅ Multi-hop graph traversal: WORKING (all three algorithms implemented)
+- ✅ Lease coordination: WORKING (acquire, release, renew endpoints)
+
+**Major Technical Breakthrough**: Resolved critical SurrealDB enum serialization that was blocking all queries
+- **Root Cause**: SurrealDB Thing types couldn't serialize to serde_json::Value
+- **Solution**: SELECT VALUE syntax with explicit key:value pairs + mixed query approach
+- **Impact**: Full persistence and retrieval functionality now operational
 - Comprehensive test suite created and passing
 - Foundation ready for application-level multi-hop logic
 

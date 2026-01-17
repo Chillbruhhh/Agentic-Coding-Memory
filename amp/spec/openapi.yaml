@@ -1,6 +1,6 @@
 openapi: 3.0.3
 info:
-  title: Agent Memory Protocol (AMP) API
+  title: Agentic Memory Protocol (AMP) API
   description: A vendor-neutral protocol for durable, unified memory in agentic software development
   version: 1.0.0
   contact:

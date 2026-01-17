@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # AMP Hackathon Demo Script
-# Demonstrates the complete Agent Memory Protocol workflow
+# Demonstrates the complete Agentic Memory Protocol workflow
 
 set -e
 
-echo "🚀 Agent Memory Protocol (AMP) Demo"
+echo "🚀 Agentic Memory Protocol (AMP) Demo"
 echo "===================================="
 echo ""
 
@@ -178,4 +178,4 @@ echo "- spec/schema.surql - Database schema"
 echo "- server/src/ - Rust server implementation"
 echo "- examples/ - Usage examples"
 echo ""
-echo "🏆 AMP demonstrates a solid foundation for agent memory protocol!"
+echo "🏆 AMP demonstrates a solid foundation for agentic memory protocol!"

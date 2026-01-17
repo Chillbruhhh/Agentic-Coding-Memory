@@ -1,4 +1,4 @@
-# Agent Memory Protocol (AMP)
+# Agentic Memory Protocol (AMP)
 
 A vendor-neutral protocol for durable, unified memory in agentic software development.
 
