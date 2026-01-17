@@ -332,7 +332,7 @@ pub async fn query(
 }
 
 fn build_query_string(request: &QueryRequest) -> String {
-    let mut query = "SELECT * FROM objects".to_string();
+    let mut base_query = "SELECT VALUE { id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding } FROM objects".to_string();
     let mut conditions = Vec::new();
     
     // Text search
@@ -373,15 +373,15 @@ fn build_query_string(request: &QueryRequest) -> String {
     
     // Combine conditions
     if !conditions.is_empty() {
-        query.push_str(" WHERE ");
-        query.push_str(&conditions.join(" AND "));
+        base_query.push_str(" WHERE ");
+        base_query.push_str(&conditions.join(" AND "));
     }
     
     // Limit
     let limit = request.limit.unwrap_or(10);
-    query.push_str(&format!(" LIMIT {}", limit));
+    base_query.push_str(&format!(" LIMIT {}", limit));
     
-    query
+    base_query
 }
 
 fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {

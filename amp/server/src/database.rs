@@ -13,13 +13,17 @@ impl Database {
         let connect_future = async {
             let client = surrealdb::engine::any::connect(database_url).await?;
             
-            // Sign in if credentials are provided via environment
+            // Sign in if credentials are provided AND we're not using file/memory database
             if let (Ok(user), Ok(pass)) = (std::env::var("DB_USER"), std::env::var("DB_PASS")) {
-                tracing::info!("Authenticating with database credentials");
-                client.signin(surrealdb::opt::auth::Root {
-                    username: &user,
-                    password: &pass,
-                }).await?;
+                if !database_url.starts_with("file://") && !database_url.starts_with("memory") {
+                    tracing::info!("Authenticating with database credentials");
+                    client.signin(surrealdb::opt::auth::Root {
+                        username: &user,
+                        password: &pass,
+                    }).await?;
+                } else {
+                    tracing::info!("Skipping authentication for file/memory database");
+                }
             }
             
             tracing::info!("Selecting namespace and database...");

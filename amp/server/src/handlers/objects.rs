@@ -34,9 +34,9 @@ fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Remove fields that should be set by the database
+    // Remove fields that should be set by the database, but keep id for INSERT
     if let Some(map) = value.as_object_mut() {
-        map.remove("id");
+        // Don't remove id - INSERT needs it
         map.remove("created_at");
         map.remove("updated_at");
     }
@@ -190,23 +190,22 @@ async fn apply_embedding(state: &AppState, obj: AmpObject) -> AmpObject {
 
 pub async fn create_object(
     State(state): State<AppState>,
-    Json(payload): Json<AmpObject>,
+    Json(payload): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
-    let payload = apply_embedding(&state, payload).await;
-    let object_id = extract_object_id(&payload);
+    let object_id = payload.get("id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
     tracing::info!("Creating object: {}", object_id);
 
-    // Prepare content without id, created_at, updated_at  
-    let content = payload_to_content_value(&payload)?;
-
-    let query = "CREATE type::record('objects', $id) CONTENT $data RETURN NONE";
+    // Use the payload directly as content
+    let query = "CREATE objects CONTENT $data";
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
             .query(query)
-            .bind(("id", object_id))
-            .bind(("data", content)),
+            .bind(("data", payload)),
     )
     .await;
 
@@ -278,12 +277,11 @@ pub async fn create_objects_batch(
         };
         let object_id = extract_object_id(&obj);
 
-        let query = "CREATE type::record('objects', $id) CONTENT $data RETURN NONE";
+        let query = "INSERT INTO objects $data";
         let result: Result<Result<surrealdb::Response, _>, _> = timeout(
             Duration::from_secs(5),
             state.db.client
                 .query(query)
-                .bind(("id", object_id))
                 .bind(("data", content)),
         )
         .await;
@@ -338,7 +336,7 @@ pub async fn get_object(
 ) -> Result<Json<Value>, StatusCode> {
     tracing::debug!("Get object: {}", id);
     
-    let query = "SELECT * FROM type::record('objects', $id)";
+    let query = "SELECT * FROM objects WHERE id = $id";
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client

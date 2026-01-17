@@ -307,7 +307,7 @@ impl HybridRetrievalService {
     }
 
     fn build_text_query_string(&self, request: &QueryRequest) -> String {
-        let mut query = "SELECT * FROM objects".to_string();
+        let mut query = "SELECT VALUE { id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding } FROM objects".to_string();
         let mut conditions = Vec::new();
         
         if let Some(text) = &request.text {
@@ -338,7 +338,7 @@ impl HybridRetrievalService {
             .join(", ");
         
         let mut query = format!(
-            "SELECT *, vector::similarity::cosine(embedding, [{}]) AS similarity FROM objects WHERE embedding IS NOT NULL",
+            "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding, vector::similarity::cosine(embedding, [{}]) AS similarity FROM objects WHERE embedding IS NOT NULL",
             vector_str
         );
         

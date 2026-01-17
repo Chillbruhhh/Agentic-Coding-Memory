@@ -2,10 +2,14 @@ use serde_json::Value as JsonValue;
 use surrealdb::Response;
 
 pub fn take_json_values(response: &mut Response, index: usize) -> Vec<JsonValue> {
+    // Simple approach: just try direct JSON deserialization
     match response.take::<Vec<JsonValue>>(index) {
-        Ok(values) => values,
-        Err(err) => {
-            tracing::warn!("Failed to decode response values: {}", err);
+        Ok(values) => {
+            tracing::info!("Successfully decoded {} values as JSON", values.len());
+            values
+        }
+        Err(e) => {
+            tracing::warn!("Failed to decode as JSON values: {}", e);
             Vec::new()
         }
     }
@@ -25,6 +29,16 @@ pub fn normalize_object_id(value: &mut JsonValue) {
     let Some(map) = value.as_object_mut() else {
         return;
     };
+    
+    // If we have id_string, use that as the main id
+    if let Some(id_string) = map.remove("id_string") {
+        if let Some(id_str) = id_string.as_str() {
+            map.insert("id".to_string(), JsonValue::String(id_str.to_string()));
+        }
+        return;
+    }
+    
+    // Fallback to existing logic for complex ID objects
     let Some(id_value) = map.get("id") else {
         return;
     };
