@@ -40,7 +40,7 @@ $symbolData = @"
     "path": "src/main.rs",
     "language": "rust",
     "content_hash": null,
-    "signature": "fn main",
+    "signature": "fn main()",
     "documentation": "Entry point for AMP server"
 }
 "@

@@ -8,7 +8,12 @@ echo ""
 
 # Test 1: Health Check
 echo "1. Testing health endpoint..."
-curl -s "$BASE_URL/health" | jq .
+HEALTH=$(curl -s "$BASE_URL/health")
+if [ $? -ne 0 ]; then
+  echo "ERROR: Cannot connect to server at $BASE_URL"
+  exit 1
+fi
+echo "$HEALTH"
 echo ""
 
 # Test 2: Create a Symbol object
@@ -42,14 +47,14 @@ CREATE_RESPONSE=$(curl -s -X POST "$BASE_URL/v1/objects" \
     }
   }")
 
-echo "$CREATE_RESPONSE" | jq .
-CREATED_ID=$(echo "$CREATE_RESPONSE" | jq -r '.id')
+echo "$CREATE_RESPONSE"
+CREATED_ID=$(echo "$CREATE_RESPONSE" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
 echo "Created object with ID: $CREATED_ID"
 echo ""
 
 # Test 3: Retrieve the object
 echo "3. Retrieving the created object..."
-curl -s "$BASE_URL/v1/objects/$CREATED_ID" | jq .
+curl -s "$BASE_URL/v1/objects/$CREATED_ID"
 echo ""
 
 # Test 4: Create a Decision object
@@ -80,7 +85,7 @@ curl -s -X POST "$BASE_URL/v1/objects" \
       \"outcome\": \"Implemented with embedded mode\",
       \"status\": \"accepted\"
     }
-  }" | jq .
+  }"
 echo ""
 
 # Test 5: Batch create
@@ -138,7 +143,7 @@ curl -s -X POST "$BASE_URL/v1/objects/batch" \
         \"documentation\": null
       }
     }
-  ]" | jq .
+  ]"
 echo ""
 
 echo "=== Test Complete ==="

@@ -22,10 +22,16 @@ data/
 .DS_Store
 
 # Logs
-*.log
+.log*
 
 # OS
 Thumbs.db
 
 # Temporary files
 GIT_ADD_INSTRUCTIONS.md
+
+
+.venv
+venv
+
+collected-texts/

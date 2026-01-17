@@ -2,8 +2,8 @@ use axum::{extract::State, http::StatusCode, response::Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
-
-use crate::AppState;
+use tokio::time::{timeout, Duration};
+use crate::{surreal_json::{normalize_object_ids, take_json_values}, AppState};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct QueryRequest {
@@ -12,6 +12,7 @@ pub struct QueryRequest {
     pub filters: Option<QueryFilters>,
     pub graph: Option<GraphQuery>,
     pub limit: Option<usize>,
+    pub hybrid: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -26,9 +27,28 @@ pub struct QueryFilters {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GraphQuery {
-    pub start_nodes: Option<Vec<Uuid>>,
+    pub start_nodes: Vec<Uuid>,
     pub relation_types: Option<Vec<String>>,
     pub max_depth: Option<usize>,
+    pub direction: Option<GraphDirection>,
+    pub algorithm: Option<TraversalAlgorithm>,
+    pub target_node: Option<Uuid>, // For shortest path algorithm
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphDirection {
+    Outbound,
+    Inbound,
+    Both,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TraversalAlgorithm {
+    Collect,    // Collect unique nodes
+    Path,       // Return all paths
+    Shortest,   // Shortest path to target
 }
 
 #[derive(Debug, Serialize)]
@@ -44,17 +64,614 @@ pub struct QueryResult {
     pub object: Value,
     pub score: f32,
     pub explanation: String,
+    pub path: Option<Vec<Value>>, // New field for traversal paths
 }
 
 pub async fn query(
-    State(_state): State<AppState>,
-    Json(_request): Json<QueryRequest>,
+    State(state): State<AppState>,
+    Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, StatusCode> {
-    // TODO: Implement hybrid query
+    let start_time = std::time::Instant::now();
+    let trace_id = Uuid::new_v4();
+    
+    tracing::info!("Query request: trace_id={}, text={:?}, has_vector={}, has_graph={}, hybrid={:?}, filters={:?}", 
+        trace_id, request.text, request.vector.is_some(), request.graph.is_some(), request.hybrid, request.filters);
+    
+    // Check if this is a hybrid query
+    if request.hybrid.unwrap_or(false) {
+        tracing::info!("Executing hybrid query: trace_id={}", trace_id);
+        
+        match state.hybrid_service.execute_hybrid_query(&request).await {
+            Ok(hybrid_response) => {
+                // Convert HybridResult to QueryResult for response compatibility
+                let results: Vec<QueryResult> = hybrid_response.results
+                    .into_iter()
+                    .map(|hybrid_result| QueryResult {
+                        object: hybrid_result.object,
+                        score: hybrid_result.total_score,
+                        explanation: hybrid_result.explanation,
+                        path: None, // Hybrid results don't have path information yet
+                    })
+                    .collect();
+                
+                return Ok(Json(QueryResponse {
+                    results,
+                    trace_id,
+                    total_count: hybrid_response.total_count,
+                    execution_time_ms: hybrid_response.execution_time_ms,
+                }));
+            }
+            Err(e) => {
+                tracing::error!("Hybrid query failed: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+        }
+    }
+    
+    // Check if this is a graph query
+    if let Some(graph) = &request.graph {
+        // Validate depth limits for performance and safety
+        if let Some(depth) = &graph.max_depth {
+            if *depth > 10 {
+                tracing::warn!("Graph query rejected: max_depth {} exceeds limit of 10", depth);
+                return Err(StatusCode::BAD_REQUEST);
+            }
+        }
+        
+        // Check if this is a multi-hop query (algorithm specified and depth > 1)
+        let is_multi_hop = graph.algorithm.is_some() && graph.max_depth.unwrap_or(1) > 1;
+        
+        if is_multi_hop {
+            tracing::info!("Executing multi-hop graph traversal: algorithm={:?}, depth={}", 
+                graph.algorithm, graph.max_depth.unwrap_or(1));
+            
+            match state.graph_service.execute_multi_hop(graph).await {
+                Ok(traversal_result) => {
+                    let results: Vec<QueryResult> = traversal_result.nodes
+                        .into_iter()
+                        .map(|obj| {
+                            QueryResult {
+                                object: obj,
+                                score: 1.0,
+                                explanation: format!("Multi-hop {} traversal result", 
+                                    graph.algorithm.as_ref().map(|a| format!("{:?}", a)).unwrap_or_default()),
+                                path: traversal_result.paths.as_ref().and_then(|paths| {
+                                    // For now, return the first path if available
+                                    paths.first().map(|path| {
+                                        path.iter().map(|id| {
+                                            serde_json::json!({"id": format!("objects:{}", id)})
+                                        }).collect()
+                                    })
+                                }),
+                            }
+                        })
+                        .collect();
+                    
+                    let total_count = results.len();
+                    let execution_time_ms = start_time.elapsed().as_millis() as u64;
+                    
+                    tracing::info!("Multi-hop graph query complete: trace_id={}, results={}, time={}ms", 
+                        trace_id, total_count, execution_time_ms);
+                    
+                    return Ok(Json(QueryResponse {
+                        results,
+                        trace_id,
+                        total_count,
+                        execution_time_ms,
+                    }));
+                }
+                Err(e) => {
+                    tracing::error!("Multi-hop graph traversal failed: {}", e);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            }
+        }
+        
+        // Fall back to single-hop query for backward compatibility
+        let limit = request.limit.unwrap_or(10);
+        let query_str = build_graph_query_string(graph, request.filters.as_ref(), limit);
+        
+        tracing::debug!("Executing single-hop graph query: {}", query_str);
+        
+        let query_result = timeout(
+            Duration::from_secs(5),
+            state.db.client.query(query_str)
+        ).await;
+        
+        let objects: Vec<Value> = match query_result {
+            Ok(Ok(mut response)) => {
+                // The query returns objects with "connected" field containing the traversed nodes
+                let raw_results: Vec<Value> = take_json_values(&mut response, 0);
+                tracing::debug!("Raw graph query results: {:?}", raw_results);
+                
+                // Extract the connected objects from the result
+                let mut connected = raw_results
+                    .into_iter()
+                    .filter_map(|v| {
+                        if let Some(obj) = v.as_object() {
+                            // Get the "connected" field which contains the traversed objects
+                            obj.get("connected").cloned()
+                        } else {
+                            None
+                        }
+                    })
+                    .flat_map(|v| {
+                        // connected can be an array or a single object
+                        if let Some(arr) = v.as_array() {
+                            arr.clone()
+                        } else {
+                            vec![v]
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                
+                normalize_object_ids(&mut connected);
+                connected
+            }
+            Ok(Err(e)) => {
+                tracing::error!("Graph query failed: {}", e);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            Err(_) => {
+                tracing::error!("Graph query timeout");
+                return Err(StatusCode::GATEWAY_TIMEOUT);
+            }
+        };
+        
+        let results: Vec<QueryResult> = objects
+            .into_iter()
+            .map(|obj| {
+                QueryResult {
+                    object: obj,
+                    score: 1.0,
+                    explanation: "Graph traversal result".to_string(),
+                    path: None, // TODO: Extract path information from recursive query results
+                }
+            })
+            .collect();
+        
+        let total_count = results.len();
+        let execution_time_ms = start_time.elapsed().as_millis() as u64;
+        
+        tracing::info!("Graph query complete: trace_id={}, results={}, time={}ms", 
+            trace_id, total_count, execution_time_ms);
+        
+        return Ok(Json(QueryResponse {
+            results,
+            trace_id,
+            total_count,
+            execution_time_ms,
+        }));
+    }
+    
+    // Determine if we should use vector search
+    let query_vector = if let Some(vector) = &request.vector {
+        Some(vector.clone())
+    } else if let Some(text) = &request.text {
+        // Generate embedding from text query if service is enabled
+        if state.embedding_service.is_enabled() {
+            match state.embedding_service.generate_embedding(text).await {
+                Ok(vec) => {
+                    tracing::debug!("Generated embedding from text query");
+                    Some(vec)
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to generate query embedding: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+    
+    // Build query based on whether we have a vector
+    let query_str = if query_vector.is_some() {
+        build_vector_query_string(&request, &query_vector.as_ref().unwrap())
+    } else {
+        build_query_string(&request)
+    };
+    
+    tracing::debug!("Executing query: {}", query_str);
+    
+    // Execute with timeout
+    let query_result = timeout(
+        Duration::from_secs(5),
+        state.db.client.query(query_str)
+    ).await;
+    
+    let objects = match query_result {
+        Ok(Ok(mut response)) => {
+            let mut results = take_json_values(&mut response, 0);
+            normalize_object_ids(&mut results);
+            results
+        }
+        Ok(Err(e)) => {
+            tracing::error!("Query failed: {}", e);
+            return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        }
+        Err(_) => {
+            tracing::error!("Query timeout");
+            return Err(StatusCode::GATEWAY_TIMEOUT);
+        }
+    };
+    
+    // Score and explain results
+    let mut results: Vec<QueryResult> = objects
+        .into_iter()
+        .map(|obj| {
+            let score = calculate_score(&obj, request.text.as_ref());
+            let explanation = generate_explanation(&obj, &request);
+            
+            QueryResult {
+                object: obj,
+                score,
+                explanation,
+                path: None, // Non-graph queries don't have path information
+            }
+        })
+        .collect();
+    
+    // Sort by score descending
+    results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    
+    let total_count = results.len();
+    let execution_time_ms = start_time.elapsed().as_millis() as u64;
+    
+    tracing::info!("Query complete: trace_id={}, results={}, time={}ms", 
+        trace_id, total_count, execution_time_ms);
+    
     Ok(Json(QueryResponse {
-        results: vec![],
-        trace_id: Uuid::new_v4(),
-        total_count: 0,
-        execution_time_ms: 0,
+        results,
+        trace_id,
+        total_count,
+        execution_time_ms,
     }))
+}
+
+fn build_query_string(request: &QueryRequest) -> String {
+    let mut query = "SELECT * FROM objects".to_string();
+    let mut conditions = Vec::new();
+    
+    // Text search
+    if let Some(text) = &request.text {
+        let text_escaped = text.replace("'", "\\'");
+        conditions.push(format!(
+            "(name CONTAINS '{}' OR title CONTAINS '{}' OR description CONTAINS '{}' OR documentation CONTAINS '{}')",
+            text_escaped, text_escaped, text_escaped, text_escaped
+        ));
+    }
+    
+    // Filters
+    if let Some(filters) = &request.filters {
+        if let Some(types) = &filters.object_types {
+            let types_str = types.iter()
+                .map(|t| format!("'{}'", t.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("type IN [{}]", types_str));
+        }
+        
+        if let Some(project_id) = &filters.project_id {
+            conditions.push(format!("project_id = '{}'", project_id.replace("'", "\\'")));
+        }
+        
+        if let Some(tenant_id) = &filters.tenant_id {
+            conditions.push(format!("tenant_id = '{}'", tenant_id.replace("'", "\\'")));
+        }
+        
+        if let Some(created_after) = &filters.created_after {
+            conditions.push(format!("created_at >= time::from::unix({})", created_after.timestamp()));
+        }
+        
+        if let Some(created_before) = &filters.created_before {
+            conditions.push(format!("created_at <= time::from::unix({})", created_before.timestamp()));
+        }
+    }
+    
+    // Combine conditions
+    if !conditions.is_empty() {
+        query.push_str(" WHERE ");
+        query.push_str(&conditions.join(" AND "));
+    }
+    
+    // Limit
+    let limit = request.limit.unwrap_or(10);
+    query.push_str(&format!(" LIMIT {}", limit));
+    
+    query
+}
+
+fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
+    let vector_str = vector.iter()
+        .map(|f| f.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    
+    let mut query = format!(
+        "SELECT *, vector::similarity::cosine(embedding, [{}]) AS similarity FROM objects WHERE embedding IS NOT NULL",
+        vector_str
+    );
+    
+    let mut conditions = Vec::new();
+    
+    // Filters
+    if let Some(filters) = &request.filters {
+        if let Some(types) = &filters.object_types {
+            let types_str = types.iter()
+                .map(|t| format!("'{}'", t.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("type IN [{}]", types_str));
+        }
+        
+        if let Some(project_id) = &filters.project_id {
+            conditions.push(format!("project_id = '{}'", project_id.replace("'", "\\'")));
+        }
+        
+        if let Some(tenant_id) = &filters.tenant_id {
+            conditions.push(format!("tenant_id = '{}'", tenant_id.replace("'", "\\'")));
+        }
+        
+        if let Some(created_after) = &filters.created_after {
+            conditions.push(format!("created_at >= time::from::unix({})", created_after.timestamp()));
+        }
+        
+        if let Some(created_before) = &filters.created_before {
+            conditions.push(format!("created_at <= time::from::unix({})", created_before.timestamp()));
+        }
+    }
+    
+    // Add additional conditions
+    if !conditions.is_empty() {
+        query.push_str(" AND ");
+        query.push_str(&conditions.join(" AND "));
+    }
+    
+    // Order by similarity
+    query.push_str(" ORDER BY similarity DESC");
+    
+    // Limit
+    let limit = request.limit.unwrap_or(10);
+    query.push_str(&format!(" LIMIT {}", limit));
+    
+    query
+}
+
+fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, limit: usize) -> String {
+    let direction = graph.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
+    let max_depth = graph.max_depth.unwrap_or(3);
+    
+    // Build the start node list
+    let start_ids_list = graph.start_nodes.iter()
+        .map(|id| format!("objects:`{}`", id))
+        .collect::<Vec<_>>()
+        .join(", ");
+    
+    // Build relationship list
+    let relation_list = if let Some(types) = &graph.relation_types {
+        types.join(", ")
+    } else {
+        "depends_on, defined_in, calls, justified_by, modifies, implements, produced".to_string()
+    };
+    
+    // Build recursive syntax based on algorithm
+    let _recursive_syntax = match &graph.algorithm {
+        Some(TraversalAlgorithm::Collect) => format!("{{{}+collect}}", max_depth),
+        Some(TraversalAlgorithm::Path) => format!("{{{}+path}}", max_depth),
+        Some(TraversalAlgorithm::Shortest) => {
+            if let Some(target) = &graph.target_node {
+                format!("{{..{}+shortest=objects:`{}`}}", max_depth, target)
+            } else {
+                format!("{{{}}}", max_depth) // Fallback to simple depth
+            }
+        }
+        None => format!("{{{}}}", max_depth), // Simple depth traversal
+    };
+    
+    // Build the graph traversal query based on algorithm
+    // Note: SurrealDB's recursive syntax {depth+algorithm} works with field access, not relationship traversal
+    // For relationship-based graphs, we need to use a different approach
+    let mut query = match &graph.algorithm {
+        Some(TraversalAlgorithm::Collect) => {
+            // For collect algorithm, we'll simulate multi-hop by using multiple relationship hops
+            // This is a simplified implementation - true recursive collect would need custom logic
+            match direction {
+                GraphDirection::Outbound => {
+                    if max_depth <= 1 {
+                        format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                    } else {
+                        // Multi-hop simulation: traverse multiple levels and collect unique results
+                        format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                    }
+                }
+                GraphDirection::Inbound => {
+                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Both => {
+                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
+                        relation_list, relation_list, start_ids_list)
+                }
+            }
+        }
+        Some(TraversalAlgorithm::Path) => {
+            // For path algorithm, fall back to simple traversal for now
+            match direction {
+                GraphDirection::Outbound => {
+                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Inbound => {
+                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Both => {
+                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
+                        relation_list, relation_list, start_ids_list)
+                }
+            }
+        }
+        Some(TraversalAlgorithm::Shortest) => {
+            // For shortest path, fall back to simple traversal for now
+            match direction {
+                GraphDirection::Outbound => {
+                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Inbound => {
+                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Both => {
+                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
+                        relation_list, relation_list, start_ids_list)
+                }
+            }
+        }
+        None => {
+            // No algorithm specified - use simple depth traversal (backward compatibility)
+            match direction {
+                GraphDirection::Outbound => {
+                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Inbound => {
+                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                }
+                GraphDirection::Both => {
+                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
+                        relation_list, relation_list, start_ids_list)
+                }
+            }
+        }
+    };
+    
+    // Add filters
+    if let Some(filters) = filters {
+        let mut conditions = Vec::new();
+        
+        if let Some(types) = &filters.object_types {
+            let types_str = types.iter()
+                .map(|t| format!("'{}'", t.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("type IN [{}]", types_str));
+        }
+        
+        if let Some(project_id) = &filters.project_id {
+            conditions.push(format!("project_id = '{}'", project_id.replace("'", "\\'")));
+        }
+        
+        if let Some(tenant_id) = &filters.tenant_id {
+            conditions.push(format!("tenant_id = '{}'", tenant_id.replace("'", "\\'")));
+        }
+        
+        if !conditions.is_empty() {
+            query.push_str(" WHERE ");
+            query.push_str(&conditions.join(" AND "));
+        }
+    }
+    
+    query.push_str(&format!(" LIMIT {}", limit));
+    query
+}
+
+fn calculate_score(obj: &Value, text_query: Option<&String>) -> f32 {
+    // If we have a similarity score from vector search, use it
+    if let Some(similarity) = obj.get("similarity").and_then(|v| v.as_f64()) {
+        return similarity as f32;
+    }
+    
+    if text_query.is_none() {
+        return 1.0; // No text query, all results equal
+    }
+    
+    let query = text_query.unwrap().to_lowercase();
+    
+    // Check name/title fields
+    if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+        if name.to_lowercase() == query {
+            return 1.0;
+        }
+        if name.to_lowercase().contains(&query) {
+            return 0.8;
+        }
+    }
+    
+    if let Some(title) = obj.get("title").and_then(|v| v.as_str()) {
+        if title.to_lowercase() == query {
+            return 1.0;
+        }
+        if title.to_lowercase().contains(&query) {
+            return 0.8;
+        }
+    }
+    
+    // Check description/documentation
+    if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
+        if desc.to_lowercase().contains(&query) {
+            return 0.6;
+        }
+    }
+    
+    if let Some(doc) = obj.get("documentation").and_then(|v| v.as_str()) {
+        if doc.to_lowercase().contains(&query) {
+            return 0.6;
+        }
+    }
+    
+    0.4 // Default for other matches
+}
+
+fn generate_explanation(obj: &Value, request: &QueryRequest) -> String {
+    let mut parts = Vec::new();
+    
+    // Check if this is a vector search result
+    if let Some(similarity) = obj.get("similarity").and_then(|v| v.as_f64()) {
+        if let Some(text) = &request.text {
+            parts.push(format!("Semantic similarity to '{}' (score: {:.3})", text, similarity));
+        } else {
+            parts.push(format!("Vector similarity (score: {:.3})", similarity));
+        }
+    } else if let Some(text) = &request.text {
+        // Text search explanation
+        let field = if obj.get("name").and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase().contains(&text.to_lowercase()))
+            .unwrap_or(false) {
+            "name"
+        } else if obj.get("title").and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase().contains(&text.to_lowercase()))
+            .unwrap_or(false) {
+            "title"
+        } else if obj.get("description").and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase().contains(&text.to_lowercase()))
+            .unwrap_or(false) {
+            "description"
+        } else {
+            "content"
+        };
+        
+        parts.push(format!("Matched text query '{}' in {}", text, field));
+    }
+    
+    if let Some(filters) = &request.filters {
+        let mut filter_parts = Vec::new();
+        
+        if let Some(types) = &filters.object_types {
+            filter_parts.push(format!("type={}", types.join(",")));
+        }
+        if let Some(project_id) = &filters.project_id {
+            filter_parts.push(format!("project={}", project_id));
+        }
+        if let Some(tenant_id) = &filters.tenant_id {
+            filter_parts.push(format!("tenant={}", tenant_id));
+        }
+        
+        if !filter_parts.is_empty() {
+            parts.push(format!("Filtered by {}", filter_parts.join(", ")));
+        }
+    }
+    
+    if parts.is_empty() {
+        "Matched query criteria".to_string()
+    } else {
+        parts.join("; ")
+    }
 }

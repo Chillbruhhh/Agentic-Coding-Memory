@@ -1,41 +1,121 @@
-# Unified Agentic Memory Layer
+# Agent Memory Protocol (AMP)
 
 ## Overview
 
-This repository contains white papers on a unified agentic memory layer designed to provide persistent, shared knowledge for AI coding agents. The system enables multiple agents to coordinate, avoid duplication, and maintain audit trails across sessions.
+A vendor-neutral protocol for durable, unified memory in agentic software development. AMP provides persistent, shared knowledge for AI coding agents, enabling coordination, avoiding duplication, and maintaining audit trails across sessions.
 
-## Documents
+**Status**: ✅ Working MVP with CRUD operations
 
-- [Unified_Agentic_Memory_White_Paper.pdf](Unified_Agentic_Memory_White_Paper.pdf): Main white paper PDF version
-- [Unified_Agentic_Memory_White_Paper-Detail.md](Unified_Agentic_Memory_White_Paper-Detail.md): Detailed Markdown version with full technical details
+## Quick Start
 
-## Key Components
+```bash
+# Clone and navigate
+git clone <repo-url>
+cd ACM/amp
 
-- **Ingestion & Indexing**: AST parsers, VCS integration, knowledge extraction
-- **Memory & Knowledge**: Vector index, knowledge graph, temporal audit log
-- **Connectivity & Coordination**: Agent Protocol, MCP, A2A, event bus
+# Run the server
+cd server
+cargo run
 
-## Design Goals
+# Test CRUD operations
+cd ../scripts
+./test-crud.ps1  # Windows
+./test-crud.sh   # Linux/Mac
+```
 
-- Universal agent integration
-- Hybrid retrieval (semantic, structural, temporal)
-- Safe multi-agent coordination
-- Enterprise-grade security and governance
+## Project Structure
 
-## Recommended Implementation
+```
+ACM/
+├── amp/                    # AMP implementation
+│   ├── server/            # Rust server (Axum + SurrealDB)
+│   ├── spec/              # OpenAPI + JSON schemas + DB schema
+│   ├── scripts/           # Test and demo scripts
+│   ├── examples/          # SDK usage examples
+│   ├── DEVLOG.md          # Development timeline
+│   └── TASKS.md           # Implementation roadmap
+├── .kiro/                 # Kiro CLI configuration
+│   ├── steering/          # Project context documents
+│   └── prompts/           # Custom development prompts
+└── .agents/               # Code reviews and analysis
+```
 
-- Use Mem0 for memory orchestration
-- MCP for standardized tools
-- Agent Protocol for lifecycle management
-- Hybrid storage: Vector DB + Graph DB + Event Store
+## Features Implemented
 
-## Phases
+✅ **CRUD Operations**
+- Create single objects (POST /v1/objects)
+- Batch create with detailed status (POST /v1/objects/batch)
+- Retrieve by ID (GET /v1/objects/{id})
 
-1. Specification & data model
-2. Ingestion & baseline indexing
-3. Agent protocol & MCP exposure
-4. Knowledge graph & temporal queries
-5. Coordination primitives & conflict resolution
-6. Enterprise controls & observability
+✅ **Memory Object Types**
+- Symbol (code structure)
+- Decision (architecture choices)
+- ChangeSet (code modifications)
+- Run (agent executions)
 
-For full details, see the white paper documents.
+✅ **Production Ready**
+- 5-second timeouts on all DB operations
+- Proper error handling and logging
+- Config validation
+- Security (localhost-only by default)
+
+## Architecture
+
+- **Server**: Rust + Axum + Tokio (async runtime)
+- **Database**: SurrealDB (embedded with vector indexing)
+- **API**: HTTP + JSON with OpenAPI v1 specification
+- **SDKs**: Auto-generated Python and TypeScript clients (planned)
+
+## Configuration
+
+Environment variables:
+
+- `PORT` - Server port (default: 8105)
+- `BIND_ADDRESS` - Bind address (default: 127.0.0.1)
+  - ⚠️ Set to `0.0.0.0` to allow external connections
+- `DATABASE_URL` - Database location (default: memory)
+  - Use `memory` for in-memory database
+  - Use `file://path/to/db` for persistent storage
+- `EMBEDDING_SERVICE_URL` - Optional embedding service endpoint
+- `MAX_EMBEDDING_DIMENSION` - Max embedding dimensions (default: 1536, range: 1-10000)
+
+## Documentation
+
+- [White Paper](Unified_Agentic_Memory_White_Paper.pdf) - Original concept and design
+- [Detailed Spec](Unified_Agentic_Memory_White_Paper-Detail.md) - Technical details
+- [Development Log](amp/DEVLOG.md) - Implementation timeline and decisions
+- [Task Roadmap](amp/TASKS.md) - Remaining features and priorities
+- [Code Reviews](.agents/code-reviews/) - Quality analysis and fixes
+
+## Development
+
+Built with Kiro CLI for the AWS Hackathon. See [DEVLOG.md](amp/DEVLOG.md) for development process and time tracking.
+
+**Total Development Time**: 7 hours  
+**Kiro CLI Usage**: Extensive (file operations, code generation, documentation)
+
+## Key Design Decisions
+
+1. **Protocol-First**: Started with OpenAPI spec and JSON schemas
+2. **Rust + SurrealDB**: Performance, type safety, built-in vector support
+3. **Embedded Database**: Simplified deployment for hackathon
+4. **Hybrid Retrieval**: Vector + graph + temporal (planned)
+5. **Coordination Primitives**: Lease-based multi-agent coordination (planned)
+
+## Next Steps
+
+See [TASKS.md](amp/TASKS.md) for the complete roadmap. Priority items:
+
+1. Query endpoint with hybrid retrieval
+2. Vector embedding integration
+3. Graph relationship queries
+4. SDK generation (Python, TypeScript)
+5. Comprehensive testing
+
+## License
+
+[Add license information]
+
+## Contributing
+
+This is a hackathon project. For questions or contributions, please open an issue.

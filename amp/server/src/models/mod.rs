@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use surrealdb::sql::Datetime;
+
+pub mod relationships;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseObject {
@@ -9,8 +10,8 @@ pub struct BaseObject {
     pub object_type: ObjectType,
     pub tenant_id: String,
     pub project_id: String,
-    pub created_at: Datetime,
-    pub updated_at: Datetime,
+    pub created_at: String,
+    pub updated_at: String,
     pub provenance: Provenance,
     #[serde(default)]
     pub links: Vec<Link>,

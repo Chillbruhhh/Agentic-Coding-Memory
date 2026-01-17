@@ -2,19 +2,7 @@
 -- Agent Memory Protocol database schema with tables, relations, and indexes
 
 -- Base table for all objects
-DEFINE TABLE objects SCHEMAFULL;
-DEFINE FIELD id ON objects TYPE record<objects>;
-DEFINE FIELD type ON objects TYPE string ASSERT $value IN ["symbol", "decision", "changeset", "run"];
-DEFINE FIELD tenant_id ON objects TYPE string;
-DEFINE FIELD project_id ON objects TYPE string;
-DEFINE FIELD created_at ON objects TYPE datetime DEFAULT time::now();
-DEFINE FIELD updated_at ON objects TYPE datetime DEFAULT time::now();
-DEFINE FIELD provenance ON objects TYPE object;
-DEFINE FIELD provenance.agent ON objects TYPE string;
-DEFINE FIELD provenance.model ON objects TYPE option<string>;
-DEFINE FIELD provenance.tools ON objects TYPE option<array<string>>;
-DEFINE FIELD provenance.summary ON objects TYPE string;
-DEFINE FIELD embedding ON objects TYPE option<array<float>>;
+DEFINE TABLE objects SCHEMALESS;
 
 -- Indexes for efficient querying
 DEFINE INDEX idx_objects_type ON objects COLUMNS type;
@@ -85,37 +73,34 @@ DEFINE INDEX idx_runs_status ON runs COLUMNS status;
 DEFINE INDEX idx_runs_confidence ON runs COLUMNS confidence;
 
 -- Relationship tables for graph traversal
-DEFINE TABLE depends_on SCHEMAFULL;
+DEFINE TABLE depends_on SCHEMALESS;
 DEFINE FIELD in ON depends_on TYPE record<objects>;
 DEFINE FIELD out ON depends_on TYPE record<objects>;
 DEFINE FIELD created_at ON depends_on TYPE datetime DEFAULT time::now();
 
-DEFINE TABLE defined_in SCHEMAFULL;
+DEFINE TABLE defined_in SCHEMALESS;
 DEFINE FIELD in ON defined_in TYPE record<objects>;
 DEFINE FIELD out ON defined_in TYPE record<objects>;
 DEFINE FIELD created_at ON defined_in TYPE datetime DEFAULT time::now();
 
-DEFINE TABLE calls SCHEMAFULL;
-DEFINE FIELD in ON calls TYPE record<objects>;
-DEFINE FIELD out ON calls TYPE record<objects>;
-DEFINE FIELD created_at ON calls TYPE datetime DEFAULT time::now();
+DEFINE TABLE calls SCHEMALESS;
 
-DEFINE TABLE justified_by SCHEMAFULL;
+DEFINE TABLE justified_by SCHEMALESS;
 DEFINE FIELD in ON justified_by TYPE record<objects>;
 DEFINE FIELD out ON justified_by TYPE record<objects>;
 DEFINE FIELD created_at ON justified_by TYPE datetime DEFAULT time::now();
 
-DEFINE TABLE modifies SCHEMAFULL;
+DEFINE TABLE modifies SCHEMALESS;
 DEFINE FIELD in ON modifies TYPE record<objects>;
 DEFINE FIELD out ON modifies TYPE record<objects>;
 DEFINE FIELD created_at ON modifies TYPE datetime DEFAULT time::now();
 
-DEFINE TABLE implements SCHEMAFULL;
+DEFINE TABLE implements SCHEMALESS;
 DEFINE FIELD in ON implements TYPE record<objects>;
 DEFINE FIELD out ON implements TYPE record<objects>;
 DEFINE FIELD created_at ON implements TYPE datetime DEFAULT time::now();
 
-DEFINE TABLE produced SCHEMAFULL;
+DEFINE TABLE produced SCHEMALESS;
 DEFINE FIELD in ON produced TYPE record<objects>;
 DEFINE FIELD out ON produced TYPE record<objects>;
 DEFINE FIELD created_at ON produced TYPE datetime DEFAULT time::now();

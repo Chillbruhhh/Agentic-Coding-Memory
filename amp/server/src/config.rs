@@ -7,6 +7,11 @@ pub struct Config {
     pub max_embedding_dimension: usize,
     pub port: u16,
     pub bind_address: String,
+    pub embedding_provider: String,
+    pub openai_api_key: Option<String>,
+    pub ollama_url: String,
+    pub embedding_dimension: usize,
+    pub embedding_model: String,
 }
 
 impl Config {
@@ -35,6 +40,17 @@ impl Config {
             port,
             bind_address: env::var("BIND_ADDRESS")
                 .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            embedding_provider: env::var("EMBEDDING_PROVIDER")
+                .unwrap_or_else(|_| "none".to_string()),
+            openai_api_key: env::var("OPENAI_API_KEY").ok(),
+            ollama_url: env::var("OLLAMA_URL")
+                .unwrap_or_else(|_| "http://localhost:11434".to_string()),
+            embedding_dimension: env::var("EMBEDDING_DIMENSION")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1536),
+            embedding_model: env::var("EMBEDDING_MODEL")
+                .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
         })
     }
 }

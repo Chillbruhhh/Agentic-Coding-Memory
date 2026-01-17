@@ -153,3 +153,13 @@ Development Best Practices
 - Update DEVLOG.md continuously, not just at the end
 - Customize .kiro/ configuration as you learn your workflow
 - Run @code-review-hackathon before submitting
+
+
+## Ensure to always reflect on our TASK.MD located in amp/task.md 
+- reflect on the pending tasks
+- execute on the remaining tasks when asked
+- update the task list as you complete features
+
+## Ensure were are always updating our DEVLOG.MD
+- log any and all additions to the code base
+- if we modify something ensure we explain it in the devlog and why we did

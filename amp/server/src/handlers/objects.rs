@@ -7,8 +7,11 @@ use serde::Serialize;
 use uuid::Uuid;
 use serde_json::Value;
 use tokio::time::{timeout, Duration};
-
-use crate::{models::AmpObject, AppState};
+use crate::{
+    models::AmpObject,
+    surreal_json::{normalize_object_id, take_json_values},
+    AppState,
+};
 
 fn extract_object_id(obj: &AmpObject) -> Uuid {
     match obj {
@@ -19,28 +22,204 @@ fn extract_object_id(obj: &AmpObject) -> Uuid {
     }
 }
 
+fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
+    // Serialize the specific object type, not the enum wrapper
+    let mut value = match payload {
+        AmpObject::Symbol(s) => serde_json::to_value(s),
+        AmpObject::Decision(d) => serde_json::to_value(d),
+        AmpObject::ChangeSet(c) => serde_json::to_value(c),
+        AmpObject::Run(r) => serde_json::to_value(r),
+    }.map_err(|err| {
+        tracing::error!("Failed to serialize payload: {}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // Remove fields that should be set by the database
+    if let Some(map) = value.as_object_mut() {
+        map.remove("id");
+        map.remove("created_at");
+        map.remove("updated_at");
+    }
+
+    // Convert to JSON string and back to ensure all enums are plain strings
+    // This prevents SurrealDB from storing them as its own enum types
+    let json_str = serde_json::to_string(&value).map_err(|e| {
+        tracing::error!("Failed to stringify JSON: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+    
+    let plain_value = serde_json::from_str(&json_str).map_err(|e| {
+        tracing::error!("Failed to parse JSON: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    Ok(plain_value)
+}
+
+fn set_embedding(mut obj: AmpObject, embedding: Option<Vec<f32>>) -> AmpObject {
+    match &mut obj {
+        AmpObject::Symbol(s) => s.base.embedding = embedding,
+        AmpObject::Decision(d) => d.base.embedding = embedding,
+        AmpObject::ChangeSet(c) => c.base.embedding = embedding,
+        AmpObject::Run(r) => r.base.embedding = embedding,
+    }
+    obj
+}
+
+fn extract_embedding_text(obj: &AmpObject) -> String {
+    let mut parts = Vec::new();
+
+    match obj {
+        AmpObject::Symbol(symbol) => {
+            parts.push(symbol.base.provenance.summary.clone());
+            parts.push(symbol.name.clone());
+            parts.push(format!("{:?}", symbol.kind));
+            parts.push(symbol.path.clone());
+            parts.push(symbol.language.clone());
+
+            if let Some(signature) = &symbol.signature {
+                parts.push(signature.clone());
+            }
+            if let Some(documentation) = &symbol.documentation {
+                parts.push(documentation.clone());
+            }
+            if let Some(content_hash) = &symbol.content_hash {
+                parts.push(content_hash.clone());
+            }
+        }
+        AmpObject::Decision(decision) => {
+            parts.push(decision.base.provenance.summary.clone());
+            parts.push(decision.title.clone());
+            parts.push(decision.problem.clone());
+            parts.push(decision.rationale.clone());
+            parts.push(decision.outcome.clone());
+
+            if let Some(status) = &decision.status {
+                parts.push(format!("{:?}", status));
+            }
+
+            if let Some(options) = &decision.options {
+                for option in options {
+                    parts.push(option.name.clone());
+                    parts.push(option.description.clone());
+                    if let Some(pros) = &option.pros {
+                        parts.extend(pros.clone());
+                    }
+                    if let Some(cons) = &option.cons {
+                        parts.extend(cons.clone());
+                    }
+                }
+            }
+        }
+        AmpObject::ChangeSet(changeset) => {
+            parts.push(changeset.base.provenance.summary.clone());
+            parts.push(changeset.title.clone());
+
+            if let Some(description) = &changeset.description {
+                parts.push(description.clone());
+            }
+            if let Some(diff) = &changeset.diff {
+                parts.push(diff.clone());
+            }
+            parts.extend(changeset.files_changed.clone());
+            parts.push(format!("{:?}", changeset.status));
+
+            if let Some(commit_hash) = &changeset.commit_hash {
+                parts.push(commit_hash.clone());
+            }
+            if let Some(tests) = &changeset.tests {
+                for test in tests {
+                    parts.push(test.name.clone());
+                    parts.push(format!("{:?}", test.status));
+                    if let Some(output) = &test.output {
+                        parts.push(output.clone());
+                    }
+                }
+            }
+        }
+        AmpObject::Run(run) => {
+            parts.push(run.base.provenance.summary.clone());
+            parts.push(run.input_summary.clone());
+            parts.push(format!("{:?}", run.status));
+
+            if let Some(outputs) = &run.outputs {
+                for output in outputs {
+                    parts.push(format!("{:?}", output.output_type));
+                    parts.push(output.content.clone());
+                }
+            }
+
+            if let Some(errors) = &run.errors {
+                for error in errors {
+                    parts.push(error.message.clone());
+                    if let Some(code) = &error.code {
+                        parts.push(code.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    parts
+        .into_iter()
+        .filter(|part| !part.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+async fn apply_embedding(state: &AppState, obj: AmpObject) -> AmpObject {
+    if !state.embedding_service.is_enabled() {
+        return obj;
+    }
+
+    let text = extract_embedding_text(&obj);
+    if text.trim().is_empty() {
+        return obj;
+    }
+
+    match state.embedding_service.generate_embedding(&text).await {
+        Ok(embedding) => set_embedding(obj, Some(embedding)),
+        Err(err) => {
+            tracing::warn!("Failed to generate embedding: {}", err);
+            obj
+        }
+    }
+}
+
+
+
 pub async fn create_object(
     State(state): State<AppState>,
     Json(payload): Json<AmpObject>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
+    let payload = apply_embedding(&state, payload).await;
     let object_id = extract_object_id(&payload);
 
-    // Insert with timeout
-    let result: Result<Result<Option<Value>, _>, _> = timeout(
+    tracing::info!("Creating object: {}", object_id);
+
+    // Prepare content without id, created_at, updated_at  
+    let content = payload_to_content_value(&payload)?;
+
+    let query = "CREATE type::record('objects', $id) CONTENT $data RETURN NONE";
+    let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
-            .insert(("objects", object_id.to_string()))
-            .content(payload)
-    ).await;
+            .query(query)
+            .bind(("id", object_id))
+            .bind(("data", content)),
+    )
+    .await;
 
     match result {
-        Ok(Ok(_)) => Ok((
-            StatusCode::CREATED,
-            Json(serde_json::json!({
-                "id": object_id,
-                "created_at": chrono::Utc::now().to_rfc3339()
-            })),
-        )),
+        Ok(Ok(_)) => {
+            Ok((
+                StatusCode::CREATED,
+                Json(serde_json::json!({
+                    "id": object_id,
+                    "created_at": chrono::Utc::now().to_rfc3339()
+                })),
+            ))
+        }
         Ok(Err(e)) => {
             tracing::error!("Failed to create object: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -83,14 +262,31 @@ pub async fn create_objects_batch(
     let mut failed = 0;
 
     for obj in payload {
+        let obj = apply_embedding(&state, obj).await;
+        let content = match payload_to_content_value(&obj) {
+            Ok(value) => value,
+            Err(status) => {
+                let object_id = extract_object_id(&obj);
+                failed += 1;
+                results.push(BatchResult {
+                    id: object_id,
+                    status: "failed".to_string(),
+                    error: Some(format!("serialization failed: {}", status)),
+                });
+                continue;
+            }
+        };
         let object_id = extract_object_id(&obj);
 
-        let result: Result<Result<Option<Value>, _>, _> = timeout(
+        let query = "CREATE type::record('objects', $id) CONTENT $data RETURN NONE";
+        let result: Result<Result<surrealdb::Response, _>, _> = timeout(
             Duration::from_secs(5),
             state.db.client
-                .insert(("objects", object_id.to_string()))
-                .content(obj)
-        ).await;
+                .query(query)
+                .bind(("id", object_id))
+                .bind(("data", content)),
+        )
+        .await;
 
         match result {
             Ok(Ok(_)) => {
@@ -140,29 +336,103 @@ pub async fn get_object(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>, StatusCode> {
-    let result: Result<Result<Option<Value>, _>, _> = timeout(
+    tracing::debug!("Get object: {}", id);
+    
+    let query = "SELECT * FROM type::record('objects', $id)";
+    let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client.select(("objects", id.to_string()))
-    ).await;
+        state.db.client
+            .query(query)
+            .bind(("id", id)),
+    )
+    .await;
 
     match result {
-        Ok(Ok(Some(mut obj))) => {
-            // Replace the record ID with just the UUID
-            if let Some(obj_map) = obj.as_object_mut() {
-                obj_map.insert("id".to_string(), serde_json::json!(id));
-            } else {
-                tracing::error!("Unexpected non-object response from database");
-                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+        Ok(Ok(mut response)) => {
+            let mut results = take_json_values(&mut response, 0);
+            if results.is_empty() {
+                tracing::warn!("Object not found: {}", id);
+                return Err(StatusCode::NOT_FOUND);
             }
-            Ok(Json(obj))
+            let mut json_value = results.remove(0);
+            normalize_object_id(&mut json_value);
+            Ok(Json(json_value))
         }
-        Ok(Ok(None)) => Err(StatusCode::NOT_FOUND),
         Ok(Err(e)) => {
             tracing::error!("Failed to retrieve object {}: {}", id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
         Err(_) => {
-            tracing::error!("Database operation timed out for object {}", id);
+            tracing::error!("Timeout retrieving object {}", id);
+            Err(StatusCode::GATEWAY_TIMEOUT)
+        }
+    }
+}
+
+pub async fn update_object(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(payload): Json<AmpObject>,
+) -> Result<StatusCode, StatusCode> {
+    let payload = apply_embedding(&state, payload).await;
+    let content = payload_to_content_value(&payload)?;
+    let object_id = extract_object_id(&payload);
+
+    if object_id != id {
+        tracing::warn!(
+            "Update rejected due to ID mismatch: path={}, payload={}",
+            id,
+            object_id
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    tracing::info!("Updating object: {}", id);
+
+    let query = "UPDATE type::record('objects', $id) MERGE $data RETURN AFTER";
+
+    let result: Result<Result<surrealdb::Response, _>, _> = timeout(
+        Duration::from_secs(5),
+        state.db.client
+            .query(query)
+            .bind(("id", id))
+            .bind(("data", content)),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(_)) => Ok(StatusCode::NO_CONTENT),
+        Ok(Err(e)) => {
+            tracing::error!("Failed to update object {}: {}", id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+        Err(_) => {
+            tracing::error!("Timeout updating object {}", id);
+            Err(StatusCode::GATEWAY_TIMEOUT)
+        }
+    }
+}
+
+pub async fn delete_object(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode, StatusCode> {
+    let query = "DELETE type::record('objects', $id)";
+    
+    let result: Result<Result<surrealdb::Response, _>, _> = timeout(
+        Duration::from_secs(5),
+        state.db.client.query(query).bind(("id", id)),
+    )
+    .await;
+
+    match result {
+        Ok(Ok(_)) => Ok(StatusCode::NO_CONTENT),
+        Ok(Err(e)) => {
+            tracing::error!("Failed to delete object {}: {}", id, e);
+            Err(StatusCode::INTERNAL_SERVER_ERROR)
+        }
+        Err(_) => {
+            tracing::error!("Timeout deleting object {}", id);
             Err(StatusCode::GATEWAY_TIMEOUT)
         }
     }
