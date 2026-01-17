@@ -29,11 +29,13 @@ cd ../scripts
 ACM/
 ├── amp/                    # AMP implementation
 │   ├── server/            # Rust server (Axum + SurrealDB)
+│   ├── cli/               # Terminal CLI interface
 │   ├── spec/              # OpenAPI + JSON schemas + DB schema
 │   ├── scripts/           # Test and demo scripts
-│   ├── examples/          # SDK usage examples
-│   ├── DEVLOG.md          # Development timeline
-│   └── TASKS.md           # Implementation roadmap
+│   └── examples/          # SDK usage examples
+├── scripts/               # Build and installation scripts
+├── docs/                  # Documentation and specifications
+├── sql/                   # Database queries and utilities
 ├── .kiro/                 # Kiro CLI configuration
 │   ├── steering/          # Project context documents
 │   └── prompts/           # Custom development prompts
