@@ -4,6 +4,7 @@ import { IoCreateOutline } from 'react-icons/io5';
 import { BiFile, BiGitBranch, BiNetworkChart } from 'react-icons/bi';
 import { useCodebases, CodebaseProject, FileNode } from '../hooks/useCodebases';
 import { KnowledgeGraphModal } from './KnowledgeGraphModal';
+import { FileContentViewer } from './FileContentViewer';
 
 interface FileTreeModalProps {
   codebase: CodebaseProject;
@@ -12,7 +13,7 @@ interface FileTreeModalProps {
 
 const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set([codebase.path]));
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileNode | null>(null);
 
   const toggleFolder = (path: string) => {
     const newExpanded = new Set(expandedFolders);
@@ -44,41 +45,39 @@ const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
 
   const renderFileNode = (node: FileNode, depth: number = 0) => {
     const isExpanded = expandedFolders.has(node.path);
-    const isSelected = selectedFile === node.path;
+    const isSelected = selectedFile?.path === node.path;
 
     return (
       <div key={node.path}>
         <div
-          className={`group flex items-center px-3 py-1 cursor-pointer transition-all hover:bg-primary/5 hover:border-l-2 hover:border-primary hover:-ml-[2px] border-l-2 border-transparent ${
-            isSelected ? 'bg-gradient-to-r from-primary/20 to-transparent border-l-primary' : ''
+          className={`flex items-center space-x-2 p-2 cursor-pointer hover:bg-panel-dark transition-colors ${
+            isSelected ? 'bg-primary/10 border-l-2 border-primary' : ''
           }`}
-          style={{ paddingLeft: `${depth * 16 + 12}px` }}
+          style={{ paddingLeft: `${depth * 16 + 8}px` }}
           onClick={() => {
             if (node.type === 'folder') {
               toggleFolder(node.path);
             } else {
-              setSelectedFile(node.path);
+              setSelectedFile(node);
             }
           }}
         >
           {node.type === 'folder' && (
-            <div className="mr-1 text-slate-500 group-hover:text-slate-300 transition-colors">
-              {isExpanded ? <HiChevronDown size={12} /> : <HiChevronRight size={12} />}
-            </div>
+            <button className="text-slate-400 hover:text-primary">
+              {isExpanded ? <HiChevronDown size={16} /> : <HiChevronRight size={16} />}
+            </button>
           )}
           
-          <div className="mr-2 text-slate-400 group-hover:text-slate-200 transition-colors">
+          <div className="text-slate-400">
             {getFileIcon(node)}
           </div>
           
-          <span className={`text-sm flex-1 transition-colors ${
-            isSelected ? 'text-white font-medium' : 'text-slate-300 group-hover:text-white'
-          }`}>
+          <span className={`text-sm ${isSelected ? 'text-primary font-medium' : 'text-slate-300'}`}>
             {node.name}
           </span>
           
-          {node.type === 'file' && node.symbols && (
-            <span className="text-[10px] text-slate-500 font-mono ml-2">
+          {node.symbols && node.symbols.length > 0 && (
+            <span className="text-xs text-slate-500 ml-auto">
               {node.symbols.length} symbols
             </span>
           )}
@@ -93,22 +92,7 @@ const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
     );
   };
 
-  const selectedFileData = () => {
-    const findFile = (nodes: FileNode[]): FileNode | null => {
-      for (const node of nodes) {
-        if (node.path === selectedFile) return node;
-        if (node.children) {
-          const found = findFile(node.children);
-          if (found) return found;
-        }
-      }
-      return null;
-    };
 
-    return findFile(codebase.file_tree);
-  };
-
-  const fileData = selectedFileData();
 
   return (
     <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -144,41 +128,14 @@ const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
 
           {/* File Preview */}
           <div className="w-1/2 flex flex-col">
-            {fileData ? (
-              <>
-                <div className="p-3 border-b border-border-dark bg-black/10">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium text-slate-300">{fileData.name}</span>
-                    <span className="text-xs text-slate-500">{fileData.language}</span>
-                  </div>
-                </div>
-                <div className="flex-1 p-4 overflow-auto">
-                  {fileData.symbols && fileData.symbols.length > 0 && (
-                    <div className="mb-4">
-                      <h4 className="text-sm font-medium text-slate-300 mb-2">Symbols</h4>
-                      <div className="space-y-1">
-                        {fileData.symbols.map((symbol, idx) => (
-                          <div key={idx} className="flex items-center gap-2 text-sm">
-                            <span className="text-primary">{symbol.type}</span>
-                            <span className="text-slate-300">{symbol.name}</span>
-                            {symbol.signature && (
-                              <span className="text-slate-500 font-mono text-xs">{symbol.signature}</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <div className="text-sm text-slate-400">
-                    <p>Path: {fileData.path}</p>
-                    <p>Size: {fileData.size}</p>
-                    <p>Modified: {fileData.modified}</p>
-                  </div>
-                </div>
-              </>
+            {selectedFile ? (
+              <FileContentViewer file={selectedFile} />
             ) : (
               <div className="flex-1 flex items-center justify-center text-slate-400">
-                Select a file to view details
+                <div className="text-center">
+                  <HiDocumentText size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>Select a file to view its content</p>
+                </div>
               </div>
             )}
           </div>

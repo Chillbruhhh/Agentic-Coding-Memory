@@ -39,48 +39,90 @@ export const useCodebases = () => {
     const pathMap: Record<string, FileNode> = {};
     const rootNodes: FileNode[] = [];
 
-    // First pass: create all file/folder nodes
-    objects.forEach(obj => {
-      if (obj.path) {
-        const pathParts = obj.path.split('/').filter(Boolean);
-        let currentPath = '';
+    // Helper to normalize paths for comparison
+    const normalizePath = (path: string) => {
+      return path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '');
+    };
 
-        pathParts.forEach((part: string, index: number) => {
-          const parentPath = currentPath;
-          currentPath = currentPath ? `${currentPath}/${part}` : `/${part}`;
+    // Separate objects by kind
+    const projectObjs = objects.filter(obj => obj.kind === 'project');
+    const dirObjs = objects.filter(obj => obj.kind === 'directory');
+    const fileObjs = objects.filter(obj => obj.kind === 'file');
+    const codeSymbols = objects.filter(obj => 
+      obj.kind && !['project', 'directory', 'file'].includes(obj.kind)
+    );
 
-          if (!pathMap[currentPath]) {
-            const isFile = index === pathParts.length - 1 && obj.type === 'Symbol';
-            
-            pathMap[currentPath] = {
-              name: part,
-              type: isFile ? 'file' : 'folder',
-              path: currentPath,
-              children: isFile ? undefined : [],
-              language: isFile ? obj.language : undefined,
-              symbols: isFile ? [] : undefined
-            };
+    console.log('Building file tree:', {
+      directories: dirObjs.length,
+      files: fileObjs.length,
+      codeSymbols: codeSymbols.length
+    });
 
-            // Add to parent or root
-            if (parentPath && pathMap[parentPath]) {
-              pathMap[parentPath].children?.push(pathMap[currentPath]);
-            } else if (!parentPath) {
-              rootNodes.push(pathMap[currentPath]);
-            }
-          }
-
-          // Add symbol to file if it's a symbol object
-          if (obj.type === 'Symbol' && index === pathParts.length - 1) {
-            pathMap[currentPath].symbols?.push({
-              name: obj.name,
-              type: 'function', // Default to function, could be enhanced
-              signature: obj.signature
-            });
-          }
-        });
+    // Create directory nodes
+    dirObjs.forEach(dir => {
+      if (dir.path) {
+        const normalizedPath = normalizePath(dir.path);
+        pathMap[normalizedPath] = {
+          name: dir.name,
+          type: 'folder',
+          path: normalizedPath,
+          children: []
+        };
       }
     });
 
+    // Create file nodes
+    fileObjs.forEach(file => {
+      if (file.path) {
+        const normalizedPath = normalizePath(file.path);
+        pathMap[normalizedPath] = {
+          name: file.name,
+          type: 'file',
+          path: normalizedPath,
+          language: file.language,
+          symbols: []
+        };
+      }
+    });
+
+    // Add code symbols to their parent files
+    codeSymbols.forEach(symbol => {
+      if (symbol.path) {
+        const normalizedPath = normalizePath(symbol.path);
+        const fileNode = pathMap[normalizedPath];
+        if (fileNode && fileNode.type === 'file') {
+          fileNode.symbols?.push({
+            name: symbol.name,
+            type: symbol.kind,
+            signature: symbol.signature
+          });
+        } else {
+          console.warn('Symbol without matching file:', symbol.name, normalizedPath);
+        }
+      }
+    });
+
+    // Build hierarchy
+    Object.values(pathMap).forEach(node => {
+      const pathParts = node.path.split('/').filter(Boolean);
+      if (pathParts.length === 1) {
+        // Root level
+        rootNodes.push(node);
+      } else {
+        // Find parent
+        const parentPath = pathParts.slice(0, -1).join('/');
+        const parent = pathMap[parentPath];
+        if (parent && parent.children) {
+          parent.children.push(node);
+        } else {
+          // No parent found, add to root
+          console.warn('No parent found for:', node.path, 'expected parent:', parentPath);
+          rootNodes.push(node);
+        }
+      }
+    });
+
+    console.log('Built file tree with', rootNodes.length, 'root nodes');
     return rootNodes;
   };
 
@@ -199,10 +241,12 @@ export const useCodebases = () => {
         
         console.log(`Total symbols found: ${totalSymbols} out of ${projectObjects.length} objects`); // Debug log
 
-        // Get project name - handle undefined project_id
-        const projectName = projectId && projectId !== 'undefined' 
-          ? projectId.charAt(0).toUpperCase() + projectId.slice(1).replace(/[-_]/g, ' ')
-          : `Python Project (${projectObjects.length} objects)`;
+        // Get project name - look for the project Symbol object first
+        const projectSymbol = projectObjects.find(obj => obj.kind === 'project');
+        const projectName = projectSymbol?.name || 
+          (projectId && projectId !== 'undefined' 
+            ? projectId.charAt(0).toUpperCase() + projectId.slice(1).replace(/[-_]/g, ' ')
+            : `Python Project (${projectObjects.length} objects)`);
 
         return {
           id: projectId || `project-${Date.now()}`,

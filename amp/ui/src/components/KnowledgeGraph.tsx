@@ -24,6 +24,10 @@ export const KnowledgeGraph: React.FC = () => {
 
   // Filter nodes based on search and type filters
   const filteredData = useMemo(() => {
+    if (!graphData || !graphData.nodes || !graphData.links) {
+      return { nodes: [], links: [] };
+    }
+    
     let filteredNodes = graphData.nodes.filter(node => 
       visibleTypes.includes(node.kind) &&
       (searchQuery === '' || node.name.toLowerCase().includes(searchQuery.toLowerCase()))

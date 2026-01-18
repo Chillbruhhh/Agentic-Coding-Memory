@@ -5,6 +5,7 @@ use std::path::Path;
 use walkdir::WalkDir;
 use uuid::Uuid;
 use chrono::Utc;
+use toml;
 
 pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Result<()> {
     println!("🔍 Indexing directory: {}", path);
@@ -28,6 +29,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     let mut created_symbols = 0;
     let mut created_directories = 0;
     let mut errors = Vec::new();
+    let mut warnings = Vec::new();
     
     // Default exclude patterns
     let mut exclude_patterns = vec![
@@ -64,8 +66,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     let mut created_dirs = std::collections::HashSet::new();
     
     // Walk directory and collect supported files
-    let supported_extensions = vec!["py", "ts", "tsx", "js", "jsx"];
+    let supported_extensions = vec!["py", "ts", "tsx", "js", "jsx", "rs", "md", "txt", "json", "toml", "yaml", "yml"];
     let mut files_to_process = Vec::new();
+    let mut skipped_files = Vec::new();
     
     for entry in WalkDir::new(root_path).follow_links(false) {
         match entry {
@@ -74,6 +77,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                 
                 // Skip if matches exclude patterns
                 if should_exclude(path, &exclude_patterns) {
+                    skipped_files.push(format!("Excluded: {}", path.display()));
                     continue;
                 }
                 
@@ -85,7 +89,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                         
                         if !created_dirs.contains(&dir_key) && !dir_key.is_empty() {
                             match create_directory_node(parent, &project_id, client).await {
-                                Ok(dir_id) => {
+                                Ok(_dir_id) => {
                                     created_directories += 1;
                                     created_dirs.insert(dir_key);
                                     println!("📂 Created directory node: {}", parent.display());
@@ -98,13 +102,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                     }
                 }
                 
-                // Check if it's a supported file type
-                if let Some(extension) = path.extension() {
-                    if let Some(ext_str) = extension.to_str() {
-                        if supported_extensions.contains(&ext_str) {
-                            files_to_process.push(path.to_path_buf());
-                        }
-                    }
+                // Check if it's a file (process all files, not just supported extensions)
+                if path.is_file() {
+                    files_to_process.push(path.to_path_buf());
                 }
                 total_files += 1;
             }
@@ -114,8 +114,16 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         }
     }
     
-    println!("📊 Found {} supported files out of {} total files", files_to_process.len(), total_files);
+    println!("\n📊 Found {} supported files out of {} total files", files_to_process.len(), total_files);
     println!("📂 Created {} directory nodes", created_directories);
+    
+    // Show first 10 skipped files for debugging
+    if !skipped_files.is_empty() {
+        println!("\n⚠️  Skipped {} files (showing first 10):", skipped_files.len());
+        for skip in skipped_files.iter().take(10) {
+            println!("   {}", skip);
+        }
+    }
     
     // Process each file and create hierarchical structure
     for file_path in files_to_process {
@@ -140,10 +148,36 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     println!("   Code symbols: {}", created_symbols);
     println!("   Total nodes: {}", 1 + created_directories + processed_files + created_symbols);
     
+    // Show project name detection info
+    println!("\n📝 Project Name Detection:");
+    if let Some(detected_name) = detect_project_name(root_path) {
+        println!("   ✅ Detected from config file: {}", detected_name);
+    } else {
+        let fallback_name = root_path.file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("project");
+        println!("   ⚠️  No config file found, using directory name: {}", fallback_name);
+    }
+    
+    // Show skipped files for debugging
+    if !skipped_files.is_empty() {
+        println!("\n⚠️  Skipped {} files:", skipped_files.len());
+        for skip in skipped_files.iter() {
+            println!("   {}", skip);
+        }
+    }
+    
     if !errors.is_empty() {
-        println!("⚠️  Errors encountered:");
+        println!("\n❌ Errors encountered ({}):", errors.len());
         for error in &errors {
             println!("   - {}", error);
+        }
+    }
+    
+    if !warnings.is_empty() {
+        println!("\n⚠️  Warnings ({}):", warnings.len());
+        for warning in &warnings {
+            println!("   - {}", warning);
         }
     }
     
@@ -154,15 +188,26 @@ pub fn should_exclude(path: &Path, exclude_patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
     
     for pattern in exclude_patterns {
-        // Simple pattern matching - check if path contains the pattern
+        // Handle wildcard patterns like *.log or *.egg-info
         if pattern.starts_with('*') {
-            // Handle wildcard patterns like *.log
             let suffix = &pattern[1..];
-            if path_str.ends_with(suffix) {
-                return true;
+            // Check if any path component ends with this suffix
+            for component in path.components() {
+                if let Some(comp_str) = component.as_os_str().to_str() {
+                    if comp_str.ends_with(suffix) {
+                        return true;
+                    }
+                }
             }
-        } else if path_str.contains(pattern) {
-            return true;
+        } else {
+            // Check if pattern matches any path component exactly
+            for component in path.components() {
+                if let Some(comp_str) = component.as_os_str().to_str() {
+                    if comp_str == pattern {
+                        return true;
+                    }
+                }
+            }
         }
     }
     
@@ -190,11 +235,66 @@ async fn process_file(file_path: &Path, client: &AmpClient) -> Result<usize> {
     }
 }
 
+fn detect_project_name(root_path: &Path) -> Option<String> {
+    // Configuration files to check in priority order
+    let config_files: Vec<(&str, fn(&Path) -> Option<String>)> = vec![
+        ("package.json", extract_name_from_package_json as fn(&Path) -> Option<String>),
+        ("Cargo.toml", extract_name_from_cargo_toml as fn(&Path) -> Option<String>),
+        ("pyproject.toml", extract_name_from_pyproject_toml as fn(&Path) -> Option<String>),
+        ("composer.json", extract_name_from_composer_json as fn(&Path) -> Option<String>),
+    ];
+    
+    for (filename, extractor) in config_files {
+        let config_path = root_path.join(filename);
+        if config_path.exists() {
+            if let Some(name) = extractor(&config_path) {
+                return Some(name);
+            }
+        }
+    }
+    
+    None
+}
+
+fn extract_name_from_package_json(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let json_value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json_value.get("name")?.as_str().map(|s| s.to_string())
+}
+
+fn extract_name_from_cargo_toml(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let toml_value: toml::Value = toml::from_str(&content).ok()?;
+    toml_value.get("package")?.get("name")?.as_str().map(|s| s.to_string())
+}
+
+fn extract_name_from_pyproject_toml(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let toml_value: toml::Value = toml::from_str(&content).ok()?;
+    toml_value.get("project")?.get("name")?.as_str().map(|s| s.to_string())
+}
+
+fn extract_name_from_composer_json(config_path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(config_path).ok()?;
+    let json_value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    json_value.get("name")?.as_str().map(|s| s.to_string())
+}
+
 async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
-    let project_name = root_path.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("project");
+    let project_name = detect_project_name(root_path)
+        .unwrap_or_else(|| {
+            root_path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "project".to_string())
+        });
+    
+    if detect_project_name(root_path).is_some() {
+        println!("📝 Using project name from configuration: {}", project_name);
+    } else {
+        println!("📁 Using directory name as project name: {}", project_name);
+    }
     
     let project_id = Uuid::new_v4().to_string();
     
@@ -286,6 +386,7 @@ async fn process_file_hierarchical(file_path: &Path, project_id: &str, client: &
         },
         Err(e) => {
             println!("⚠️  Codebase parser failed ({}), file node created", e);
+            warnings.push(format!("Parser failed for {}: {}", file_path.display(), e));
             Ok(1) // Just the file node
         }
     }
@@ -394,7 +495,7 @@ async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, clien
     Ok(1)
 }
 
-fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, file_path: &Path, file_id: &str) -> Result<serde_json::Value> {
+fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, file_path: &Path, _file_id: &str) -> Result<serde_json::Value> {
     let now = chrono::Utc::now();
     
     let name = symbol_data.get("name")
