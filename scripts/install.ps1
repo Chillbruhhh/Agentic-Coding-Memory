@@ -11,9 +11,18 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
+# Navigate to repository root if we're in scripts directory
+$currentDir = Get-Location
+if ($currentDir.Path -like "*\scripts") {
+    Set-Location ".."
+}
+
 # Build and install the CLI
 Set-Location "amp\cli"
 cargo install --path . --force
+
+# Return to original directory
+Set-Location $currentDir
 
 Write-Host "✅ AMP CLI installed successfully!" -ForegroundColor Green
 Write-Host "📋 Usage: amp --help" -ForegroundColor Cyan

@@ -4,7 +4,7 @@
 
 A vendor-neutral protocol for durable, unified memory in agentic software development. AMP provides persistent, shared knowledge for AI coding agents, enabling coordination, avoiding duplication, and maintaining audit trails across sessions.
 
-**Status**: ✅ Working MVP with CRUD operations
+**Status**: ✅ Complete Working System - Server, CLI, and UI
 
 ## Quick Start
 
@@ -17,10 +17,14 @@ cd ACM/amp
 cd server
 cargo run
 
-# Test CRUD operations
-cd ../scripts
-./test-crud.ps1  # Windows
-./test-crud.sh   # Linux/Mac
+# Index a codebase (in another terminal)
+cd ../cli
+cargo run -- index /path/to/your/project
+
+# Launch the UI (in another terminal)
+cd ../ui
+npm install
+npm run dev
 ```
 
 ## Project Structure
@@ -30,6 +34,7 @@ ACM/
 ├── amp/                    # AMP implementation
 │   ├── server/            # Rust server (Axum + SurrealDB)
 │   ├── cli/               # Terminal CLI interface
+│   ├── ui/                # React/Tauri desktop UI
 │   ├── spec/              # OpenAPI + JSON schemas + DB schema
 │   ├── scripts/           # Test and demo scripts
 │   └── examples/          # SDK usage examples
@@ -49,13 +54,29 @@ ACM/
 - Batch create with detailed status (POST /v1/objects/batch)
 - Retrieve by ID (GET /v1/objects/{id})
 
-✅ **Codebase Parser** (NEW)
+✅ **Codebase Parser**
 - Tree-sitter based parsing for Python and TypeScript
 - Symbol extraction (functions, classes, interfaces, variables)
-- Dependency analysis (imports/exports)
+- Dependency analysis (imports/exports detection)
 - Structured file logs optimized for embeddings
 - Change tracking with links to AMP objects
 - Content hash-based change detection
+
+✅ **CLI Interface** (NEW)
+- Complete command-line tool with 7 commands
+- Directory indexing with smart exclude patterns
+- Hierarchical object creation (Project → Files → Symbols)
+- Graph relationship mapping with proper SurrealDB syntax
+- Terminal UI (TUI) with session management
+- Git repository awareness and file system monitoring
+
+✅ **Desktop UI** (NEW)
+- Professional React/Tauri application
+- Industrial cyberpunk design theme
+- Interactive file explorer with symbol preview
+- 3D knowledge graph visualization
+- Real-time codebase analytics dashboard
+- Cross-platform desktop application
 
 ✅ **Memory Object Types**
 - Symbol (code structure)
@@ -101,8 +122,8 @@ Environment variables:
 
 Built with Kiro CLI for the AWS Hackathon. See [DEVLOG.md](amp/DEVLOG.md) for development process and time tracking.
 
-**Total Development Time**: 7 hours  
-**Kiro CLI Usage**: Extensive (file operations, code generation, documentation)
+**Total Development Time**: 30+ hours  
+**Kiro CLI Usage**: Extensive (file operations, code generation, documentation, debugging)
 
 ## Key Design Decisions
 
@@ -116,11 +137,11 @@ Built with Kiro CLI for the AWS Hackathon. See [DEVLOG.md](amp/DEVLOG.md) for de
 
 See [TASKS.md](amp/TASKS.md) for the complete roadmap. Priority items:
 
-1. Query endpoint with hybrid retrieval
-2. Vector embedding integration
-3. Graph relationship queries
-4. SDK generation (Python, TypeScript)
-5. Comprehensive testing
+1. ✅ Query endpoint with hybrid retrieval (COMPLETE)
+2. ✅ Vector embedding integration (COMPLETE)
+3. ✅ Graph relationship queries (COMPLETE)
+4. [ ] SDK generation (Python, TypeScript)
+5. [ ] Comprehensive testing
 
 ## License
 

@@ -1,0 +1,34 @@
+{
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devPath": "http://localhost:8109",
+    "distDir": "../dist"
+  },
+  "package": {
+    "productName": "AMP Knowledge Graph",
+    "version": "0.1.0"
+  },
+  "tauri": {
+    "allowlist": {
+      "http": {
+        "all": true,
+        "request": true
+      }
+    },
+    "bundle": {
+      "active": false,
+      "identifier": "com.amp.knowledge-graph"
+    },
+    "security": {
+      "csp": null
+    },
+    "windows": [
+      {
+        "title": "AMP Knowledge Graph",
+        "width": 1200,
+        "height": 800
+      }
+    ]
+  }
+}

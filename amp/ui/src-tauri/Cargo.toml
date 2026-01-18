@@ -1,0 +1,20 @@
+[package]
+name = "amp-ui"
+version = "0.1.0"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.0", features = [] }
+
+[dependencies]
+tauri = { version = "1.0", features = [ "http-all"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
+reqwest = { version = "0.11", features = ["json"] }
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

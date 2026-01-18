@@ -401,17 +401,17 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
     
-    let kind = symbol_data.get("kind")
+    // Fix: Use "symbol_type" instead of "kind" to match the parser output
+    let kind = symbol_data.get("symbol_type")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
     
-    let line_start = symbol_data.get("line_start")
+    let line_start = symbol_data.get("start_line")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     
-    let signature = symbol_data.get("signature")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    // Create a signature from the symbol data
+    let signature = format!("{}: {}", kind, name);
     
     // Determine language from file extension
     let language = match file_path.extension().and_then(|e| e.to_str()) {
@@ -440,7 +440,7 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
         "language": language,
         "content_hash": format!("{:x}", md5::compute(signature.as_bytes())),
         "signature": signature,
-        "documentation": format!("{} {} at line {} in {}", kind, name, line_start, file_path.display())
+        "documentation": format!("{} {} at line {} in {}", kind, name, line_start + 1, file_path.display())
     });
     
     Ok(symbol)

@@ -71,6 +71,11 @@ impl CodebaseParser {
             
             (assignment
               left: (identifier) @variable.name) @variable.definition
+            
+            (function_definition
+              body: (block
+                (function_definition
+                  name: (identifier) @method.name))) @method.definition
             "#,
         )?;
         
@@ -128,6 +133,12 @@ impl CodebaseParser {
             
             (method_definition
               name: (property_identifier) @method.name) @method.definition
+            
+            (arrow_function) @arrow_function.definition
+            
+            (assignment_expression
+              left: (identifier) @variable.name
+              right: [(arrow_function) (function_expression)]) @variable.definition
             "#,
         )?;
         
@@ -251,21 +262,34 @@ impl CodebaseParser {
         let matches = cursor.matches(&queries.symbols, tree.root_node(), content.as_bytes());
         
         for m in matches {
+            let mut symbol_name = String::new();
+            let mut symbol_type = String::from("unknown");
+            let mut node_for_position = None;
+            
             for capture in m.captures {
                 let node = capture.node;
                 let capture_name = &queries.symbols.capture_names()[capture.index as usize];
                 
                 if capture_name.ends_with(".name") {
-                    let symbol_type = capture_name.split('.').next().unwrap_or("unknown");
-                    let name = node.utf8_text(content.as_bytes())?;
-                    
+                    // Extract the symbol type from the capture name (e.g., "function.name" -> "function")
+                    symbol_type = capture_name.split('.').next().unwrap_or("unknown").to_string();
+                    symbol_name = node.utf8_text(content.as_bytes())?.to_string();
+                    node_for_position = Some(node);
+                } else if capture_name.ends_with(".definition") && node_for_position.is_none() {
+                    // Use the definition node for position if we don't have a name node yet
+                    node_for_position = Some(node);
+                }
+            }
+            
+            if !symbol_name.is_empty() {
+                if let Some(pos_node) = node_for_position {
                     symbols.push(ParsedSymbol {
-                        name: name.to_string(),
-                        symbol_type: symbol_type.to_string(),
-                        start_line: node.start_position().row,
-                        end_line: node.end_position().row,
-                        start_byte: node.start_byte(),
-                        end_byte: node.end_byte(),
+                        name: symbol_name,
+                        symbol_type,
+                        start_line: pos_node.start_position().row,
+                        end_line: pos_node.end_position().row,
+                        start_byte: pos_node.start_byte(),
+                        end_byte: pos_node.end_byte(),
                         file_path: file_path.to_string_lossy().to_string(),
                         language: language.to_string(),
                     });

@@ -13,6 +13,10 @@ data/
 .env
 .env.local
 
+# Node
+node_modules/
+**/node_modules/
+
 # IDE
 .vscode/
 .idea/
