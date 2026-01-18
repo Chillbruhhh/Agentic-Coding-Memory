@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/assets/AMP-banner.png" alt="AMP Logo" width="800"/>
+</p>
+
 # Agentic Memory Protocol (AMP)
 
 A vendor-neutral protocol for durable, unified memory in agentic software development.

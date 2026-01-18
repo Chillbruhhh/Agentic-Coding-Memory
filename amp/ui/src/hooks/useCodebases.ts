@@ -29,6 +29,8 @@ export interface FileNode {
 
 export const useCodebases = () => {
   const [codebases, setCodebases] = useState<CodebaseProject[]>([]);
+  const [objects, setObjects] = useState<any[]>([]);
+  const [relationships, setRelationships] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,7 +45,7 @@ export const useCodebases = () => {
         const pathParts = obj.path.split('/').filter(Boolean);
         let currentPath = '';
 
-        pathParts.forEach((part, index) => {
+        pathParts.forEach((part: string, index: number) => {
           const parentPath = currentPath;
           currentPath = currentPath ? `${currentPath}/${part}` : `/${part}`;
 
@@ -123,7 +125,37 @@ export const useCodebases = () => {
         throw new Error('No parsed codebases found. Run CLI indexing first.');
       }
       
-      console.log(`Found ${objects.length} objects`); // Debug log
+      // Fetch relationships from AMP server relationships endpoint
+      const relationshipsResponse = await fetch('http://localhost:8105/v1/relationships?type=defined_in', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      
+      let relationshipData = [];
+      if (relationshipsResponse.ok) {
+        const relationships = await relationshipsResponse.json();
+        console.log('Fetched relationships:', relationships.length, relationships.slice(0, 3)); // Debug log
+        
+        relationshipData = relationships.map((rel: any) => {
+          // Extract UUIDs from "objects:⟨uuid⟩" format
+          const inId = rel.in?.replace(/^objects:⟨|⟩$/g, '') || rel.in;
+          const outId = rel.out?.replace(/^objects:⟨|⟩$/g, '') || rel.out;
+          console.log('Extracted relationship IDs:', inId, '->', outId); // Debug log
+          return {
+            in: inId,
+            out: outId,
+            relation_type: 'defined_in'
+          };
+        }).filter((rel: any) => rel.in && rel.out);
+      } else {
+        console.error('Failed to fetch relationships:', relationshipsResponse.status, relationshipsResponse.statusText);
+      }
+      
+      setRelationships(relationshipData);
+      setObjects(objects);
+      console.log(`Found ${objects.length} objects and ${relationshipData.length} relationships`); // Debug log
 
       // Group objects by project_id to create codebases
       const projectGroups: Record<string, any[]> = {};
@@ -179,21 +211,6 @@ export const useCodebases = () => {
           description: `Parsed codebase with ${totalSymbols} symbols across ${Math.max(totalFiles, projectObjects.length)} files`,
           language_stats: Object.keys(languageStats).length > 0 ? languageStats : { 'Python': 100 },
           total_files: Math.max(totalFiles, projectObjects.length),
-          total_symbols: Math.max(totalSymbols, projectObjects.length),
-          last_indexed: projectObjects[0]?.created_at || projectObjects[0]?.timestamp || new Date().toISOString(),
-          file_tree: fileTree.length > 0 ? fileTree : [{
-            name: 'parsed_objects',
-            type: 'folder' as const,
-            path: '/parsed_objects',
-            children: projectObjects.slice(0, 20).map((obj, idx) => ({
-              name: obj.name || `object_${idx}`,
-              type: 'file' as const,
-              path: obj.path || `/object_${idx}`,
-              language: obj.language || 'python',
-              symbols: [{ name: obj.name || 'symbol', type: 'function' }]
-            }))
-          }],
-          total_files: totalFiles,
           total_symbols: totalSymbols,
           last_indexed: projectObjects[0]?.created_at || new Date().toISOString(),
           file_tree: fileTree
@@ -220,6 +237,8 @@ export const useCodebases = () => {
 
   return {
     codebases,
+    objects,
+    relationships,
     loading,
     error,
     refetch

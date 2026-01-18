@@ -32,18 +32,35 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [nodes, setNodes] = useState<GraphNode[]>([]);
-  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
+  const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1.5 }); // Start zoomed in
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const animationRef = useRef<number>();
   const bgAnimationRef = useRef<number>();
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Convert codebase to hierarchical graph data
   const graphData = useMemo(() => {
     const allNodes: GraphNode[] = [];
     let nodeId = 0;
 
-    const processNode = (fileNode: any, depth: number = 0, parentId?: string): GraphNode | null => {
+    // Create root node for the repository
+    const rootNode: GraphNode = {
+      id: 'root',
+      name: codebase.name,
+      type: 'folder',
+      path: codebase.path || '/',
+      x: 600,
+      y: 400,
+      vx: 0,
+      vy: 0,
+      children: [],
+      collapsed: true, // Start collapsed
+      depth: 0
+    };
+    allNodes.push(rootNode);
+
+    const processNode = (fileNode: any, depth: number = 1, parentId?: string): GraphNode | null => {
       const node: GraphNode = {
         id: `node-${nodeId++}`,
         name: fileNode.name,
@@ -56,7 +73,7 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
         vy: 0,
         children: [],
         parent: parentId,
-        collapsed: depth > 1,
+        collapsed: true, // Start with everything collapsed
         depth
       };
 
@@ -93,13 +110,39 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
       return node;
     };
 
-    codebase.file_tree.forEach(rootNode => processNode(rootNode));
+    codebase.file_tree.forEach(rootFileNode => {
+      const childNode = processNode(rootFileNode, 1, 'root');
+      if (childNode) rootNode.children!.push(childNode);
+    });
     return allNodes;
   }, [codebase]);
 
   useEffect(() => {
     setNodes(graphData);
+    setIsInitialized(false); // Reset initialization when data changes
   }, [graphData]);
+
+  // Center view on root node after nodes are loaded
+  useEffect(() => {
+    if (nodes.length > 0 && !isInitialized && canvasRef.current) {
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      const rootNode = nodes.find(n => n.id === 'root');
+      
+      if (rootNode) {
+        // Center the root node in the viewport
+        const centerX = rect.width / 2;
+        const centerY = rect.height / 2;
+        
+        setTransform({
+          x: centerX - rootNode.x * 1.5,
+          y: centerY - rootNode.y * 1.5,
+          scale: 1.5
+        });
+        setIsInitialized(true);
+      }
+    }
+  }, [nodes, isInitialized]);
 
   const getVisibleNodes = () => {
     const visible: GraphNode[] = [];
@@ -188,18 +231,18 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
       visibleNodes.forEach(node => {
         const centerX = 600;
         const centerY = 400;
-        node.vx += (centerX - node.x) * 0.001;
-        node.vy += (centerY - node.y) * 0.001;
+        node.vx += (centerX - node.x) * 0.0005; // Reduced from 0.001
+        node.vy += (centerY - node.y) * 0.0005; // Reduced from 0.001
 
         visibleNodes.forEach(other => {
           if (node.id !== other.id) {
             const dx = other.x - node.x;
             const dy = other.y - node.y;
             const dist = Math.sqrt(dx * dx + dy * dy);
-            const minDist = 100;
+            const minDist = 120; // Increased from 100
 
             if (dist < minDist && dist > 0) {
-              const force = (minDist - dist) / dist * 0.5;
+              const force = (minDist - dist) / dist * 0.3; // Reduced from 0.5
               node.vx -= dx * force;
               node.vy -= dy * force;
             }
@@ -214,7 +257,7 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
         const targetDist = 150;
 
         if (dist > 0) {
-          const force = (dist - targetDist) / dist * 0.1;
+          const force = (dist - targetDist) / dist * 0.05; // Reduced from 0.1
           const fx = dx * force;
           const fy = dy * force;
 
@@ -228,8 +271,8 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
       visibleNodes.forEach(node => {
         node.x += node.vx;
         node.y += node.vy;
-        node.vx *= 0.85;
-        node.vy *= 0.85;
+        node.vx *= 0.9; // Increased damping from 0.85
+        node.vy *= 0.9; // Increased damping from 0.85
       });
 
       setNodes([...nodes]);
@@ -244,8 +287,16 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { 
+      alpha: true,
+      desynchronized: true,
+      willReadFrequently: false
+    });
     if (!ctx) return;
+
+    // Enable high-quality rendering
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
 
     const getNodeColor = (node: GraphNode, isSelected: boolean, isHovered: boolean) => {
       if (isSelected) return { fill: 'rgba(255, 255, 255, 0.15)', stroke: '#ffffff' };
@@ -289,7 +340,18 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
         const isSelected = selectedNode?.id === node.id;
         const isHovered = hoveredNode?.id === node.id;
         const hasChildren = node.children && node.children.length > 0;
-        const size = 25;
+        const size = 30; // Increased from 25 to 30
+
+        // Hover ring to show clickable area
+        if (isHovered) {
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, 38, 0, Math.PI * 2);
+          ctx.strokeStyle = 'rgba(255, 107, 107, 0.4)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([5, 5]);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
 
         // Outer glow for selected/hovered
         if (isSelected || isHovered) {
@@ -359,20 +421,35 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
   // Mouse interactions
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const canvas = canvasRef.current;
+    if (!rect || !canvas) return;
 
-    const x = (e.clientX - rect.left - transform.x) / transform.scale;
-    const y = (e.clientY - rect.top - transform.y) / transform.scale;
+    // Account for canvas internal size vs display size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+    
+    const x = (canvasX - transform.x) / transform.scale;
+    const y = (canvasY - transform.y) / transform.scale;
 
     const visibleNodes = getVisibleNodes();
     const clickedNode = visibleNodes.find(node => {
       const dx = x - node.x;
       const dy = y - node.y;
-      return Math.sqrt(dx * dx + dy * dy) < 25;
+      return Math.sqrt(dx * dx + dy * dy) < 40;
     });
 
     if (clickedNode) {
       setSelectedNode(clickedNode);
+      
+      // Left-click expands if collapsed
+      if (clickedNode.children && clickedNode.children.length > 0 && clickedNode.collapsed) {
+        setNodes(nodes.map(n => 
+          n.id === clickedNode.id ? { ...n, collapsed: false } : n
+        ));
+      }
     } else {
       setIsDragging(true);
       setDragStart({ x: e.clientX - transform.x, y: e.clientY - transform.y });
@@ -382,21 +459,30 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
   const handleContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
     e.preventDefault();
     const rect = canvasRef.current?.getBoundingClientRect();
-    if (!rect) return;
+    const canvas = canvasRef.current;
+    if (!rect || !canvas) return;
 
-    const x = (e.clientX - rect.left - transform.x) / transform.scale;
-    const y = (e.clientY - rect.top - transform.y) / transform.scale;
+    // Account for canvas internal size vs display size
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    const canvasX = (e.clientX - rect.left) * scaleX;
+    const canvasY = (e.clientY - rect.top) * scaleY;
+    
+    const x = (canvasX - transform.x) / transform.scale;
+    const y = (canvasY - transform.y) / transform.scale;
 
     const visibleNodes = getVisibleNodes();
     const clickedNode = visibleNodes.find(node => {
       const dx = x - node.x;
       const dy = y - node.y;
-      return Math.sqrt(dx * dx + dy * dy) < 25;
+      return Math.sqrt(dx * dx + dy * dy) < 40;
     });
 
-    if (clickedNode && clickedNode.children && clickedNode.children.length > 0) {
+    // Right-click collapses if expanded
+    if (clickedNode && clickedNode.children && clickedNode.children.length > 0 && !clickedNode.collapsed) {
       setNodes(nodes.map(n => 
-        n.id === clickedNode.id ? { ...n, collapsed: !n.collapsed } : n
+        n.id === clickedNode.id ? { ...n, collapsed: true } : n
       ));
     }
   };
@@ -412,17 +498,32 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
         y: e.clientY - dragStart.y
       });
     } else {
-      const x = (e.clientX - rect.left - transform.x) / transform.scale;
-      const y = (e.clientY - rect.top - transform.y) / transform.scale;
+      // Account for canvas internal size vs display size
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      
+      const canvasX = (e.clientX - rect.left) * scaleX;
+      const canvasY = (e.clientY - rect.top) * scaleY;
+      
+      const x = (canvasX - transform.x) / transform.scale;
+      const y = (canvasY - transform.y) / transform.scale;
 
       const visibleNodes = getVisibleNodes();
       const hovered = visibleNodes.find(node => {
         const dx = x - node.x;
         const dy = y - node.y;
-        return Math.sqrt(dx * dx + dy * dy) < 25;
+        return Math.sqrt(dx * dx + dy * dy) < 40;
       });
 
       setHoveredNode(hovered || null);
+      
+      // Change cursor based on hover state
+      if (canvasRef.current) {
+        canvasRef.current.style.cursor = hovered ? 'pointer' : 'move';
+      }
     }
   };
 
@@ -497,11 +598,11 @@ export const KnowledgeGraphModal: React.FC<KnowledgeGraphModalProps> = ({ codeba
             </li>
             <li className="flex items-center text-xs text-gray-400 group cursor-pointer hover:text-primary transition-colors">
               <MdTouchApp className="text-sm mr-3 text-primary/70 group-hover:text-primary" />
-              Click: Select Node
+              Click: Select/Expand Node
             </li>
             <li className="flex items-center text-xs text-gray-400 group cursor-pointer hover:text-primary transition-colors">
               <MdTouchApp className="text-sm mr-3 text-primary/70 group-hover:text-primary" />
-              Right-Click: Expand/Collapse
+              Right-Click: Collapse Node
             </li>
           </ul>
         </div>

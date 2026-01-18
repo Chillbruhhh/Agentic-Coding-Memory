@@ -102,8 +102,8 @@ pub async fn get_relationships(
     State(state): State<AppState>,
     Query(query): Query<RelationshipQuery>,
 ) -> Result<Json<Vec<Value>>, StatusCode> {
-    // Build query based on filters
-    let mut query_str = String::from("SELECT * FROM [");
+    // Build query based on filters - use SELECT VALUE to avoid enum serialization issues
+    let mut query_str = String::from("SELECT VALUE { in: string::concat(in.id), out: string::concat(out.id), created_at: created_at } FROM [");
     
     if let Some(rel_type) = &query.relation_type {
         query_str.push_str(rel_type);

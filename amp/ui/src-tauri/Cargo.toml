@@ -7,7 +7,7 @@ edition = "2021"
 tauri-build = { version = "1.0", features = [] }
 
 [dependencies]
-tauri = { version = "1.0", features = [ "http-all"] }
+tauri = { version = "1.0", features = [ "window-set-resizable", "window-set-minimizable", "window-set-closable", "window-set-maximizable", "window-start-dragging", "window-minimize", "window-show", "window-maximize", "window-hide", "window-unmaximize", "window-close", "window-unminimize", "http-all"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }

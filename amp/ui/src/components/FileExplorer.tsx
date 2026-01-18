@@ -188,7 +188,11 @@ const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
   );
 };
 
-export const FileExplorer: React.FC = () => {
+interface FileExplorerProps {
+  onNavigateToGraph?: () => void;
+}
+
+export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph }) => {
   const { codebases, loading, error, refetch } = useCodebases();
   const [selectedCodebase, setSelectedCodebase] = useState<CodebaseProject | null>(null);
   const [knowledgeGraphCodebase, setKnowledgeGraphCodebase] = useState<CodebaseProject | null>(null);
@@ -269,7 +273,9 @@ export const FileExplorer: React.FC = () => {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setKnowledgeGraphCodebase(codebase);
+                      if (onNavigateToGraph) {
+                        onNavigateToGraph();
+                      }
                     }}
                     className="p-2 hover:bg-primary/20 rounded text-slate-500 hover:text-primary transition-colors border border-transparent hover:border-primary/50"
                     title="View Knowledge Graph"

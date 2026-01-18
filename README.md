@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="amp/public/assets/AMP-banner.png" alt="AMP Logo" width="800"/>
+</p>
+
 # Agentic Memory Protocol (AMP)
 
 ## Overview
