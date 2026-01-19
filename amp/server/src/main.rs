@@ -1,10 +1,13 @@
 use axum::{
+    extract::State,
     http::StatusCode,
-    response::Json,
+    middleware::{from_fn_with_state, Next},
+    response::{Json, Response},
     routing::{delete, get, post, put},
     Router,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 use tracing_subscriber::filter::LevelFilter;
@@ -21,6 +24,7 @@ use database::Database;
 use services::embedding::EmbeddingService;
 use services::graph::GraphTraversalService;
 use services::hybrid::HybridRetrievalService;
+use services::analytics::AnalyticsService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,6 +33,7 @@ pub struct AppState {
     pub embedding_service: Arc<dyn EmbeddingService>,
     pub graph_service: Arc<GraphTraversalService>,
     pub hybrid_service: Arc<HybridRetrievalService>,
+    pub analytics_service: Arc<AnalyticsService>,
 }
 
 #[tokio::main]
@@ -108,18 +113,23 @@ async fn main() -> anyhow::Result<()> {
     );
     tracing::info!("Hybrid retrieval service initialized");
 
+    let analytics_service = Arc::new(AnalyticsService::new(db.clone()));
+    tracing::info!("Analytics service initialized");
+
     let state = AppState { 
         db, 
         config: config.clone(),
         embedding_service: embedding_service_arc,
         graph_service,
         hybrid_service: Arc::new(hybrid_service),
+        analytics_service,
     };
 
     // Build router
     let app = Router::new()
         .route("/health", get(health_check))
         .nest("/v1", api_routes())
+        .layer(from_fn_with_state(state.clone(), track_latency))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state);
@@ -153,6 +163,20 @@ fn api_routes() -> Router<AppState> {
         .route("/codebase/file-logs", get(handlers::codebase::get_file_logs))
         .route("/codebase/file-logs/:path", get(handlers::codebase::get_file_log))
         .route("/codebase/update-file-log", post(handlers::codebase::update_file_log))
+        // Analytics endpoint
+        .route("/analytics", get(handlers::analytics::get_analytics))
+}
+
+async fn track_latency(
+    State(state): State<AppState>,
+    request: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+    let start = Instant::now();
+    let response = next.run(request).await;
+    let latency_ms = start.elapsed().as_secs_f32() * 1000.0;
+    state.analytics_service.record_request_latency(latency_ms);
+    response
 }
 
 async fn health_check() -> Result<Json<serde_json::Value>, StatusCode> {

@@ -24,118 +24,103 @@ export interface AnalyticsData {
     lastIndexTime: string;
     indexingSpeed: string;
   };
+  requestLatency: {
+    p99: number;
+    p95: number;
+    p50: number;
+    avg: number;
+    dataPoints: Array<{
+      timestamp: string;
+      latency: number;
+    }>;
+  };
+  errorDistribution: Array<{
+    label: string;
+    count: number;
+    percent: number;
+    color: string;
+  }>;
+  systemEvents: Array<{
+    time: string;
+    event: string;
+    origin: string;
+    status: string;
+    alert: boolean;
+  }>;
 }
 
 export const useAnalytics = () => {
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [timeInterval, setTimeInterval] = useState<string>('1h');
+
+  const normalizeAnalytics = (payload: any): AnalyticsData => {
+    const requestLatency = payload.requestLatency || {};
+    const dataPoints = requestLatency.dataPoints || requestLatency.data_points || [];
+
+    return {
+      totalObjects: payload.totalObjects ?? 0,
+      totalRelationships: payload.totalRelationships ?? 0,
+      objectsByType: payload.objectsByType || {},
+      languageDistribution: payload.languageDistribution || {},
+      recentActivity: payload.recentActivity || [],
+      systemMetrics: payload.systemMetrics || {
+        memoryUsage: 0,
+        cpuUsage: 0,
+        diskUsage: 0,
+        uptime: '',
+      },
+      indexingStats: payload.indexingStats || {
+        filesIndexed: 0,
+        symbolsExtracted: 0,
+        lastIndexTime: '',
+        indexingSpeed: '',
+      },
+      requestLatency: {
+        p99: requestLatency.p99 ?? 0,
+        p95: requestLatency.p95 ?? 0,
+        p50: requestLatency.p50 ?? 0,
+        avg: requestLatency.avg ?? 0,
+        dataPoints,
+      },
+      errorDistribution: payload.errorDistribution || [],
+      systemEvents: payload.systemEvents || [],
+    };
+  };
 
   const fetchAnalytics = async () => {
     try {
-      setLoading(true);
       setError(null);
 
-      // Try to fetch real analytics data
-      try {
-        const response = await fetch('http://localhost:8105/v1/analytics');
-        if (response.ok) {
-          const data = await response.json();
-          setAnalytics(data);
-          return;
-        }
-      } catch (fetchError) {
-        console.log('Using mock analytics - server not available');
+      const response = await fetch('http://localhost:8105/v1/analytics');
+      if (!response.ok) {
+        throw new Error(`Server responded with status: ${response.status}`);
       }
 
-      // Fallback to mock analytics data
-      const mockAnalytics: AnalyticsData = {
-        totalObjects: 931,
-        totalRelationships: 924,
-        objectsByType: {
-          'Symbol': 687,
-          'Decision': 12,
-          'ChangeSet': 45,
-          'Run': 187
-        },
-        languageDistribution: {
-          'TypeScript': 342,
-          'Rust': 289,
-          'Markdown': 156,
-          'JSON': 89,
-          'TOML': 34,
-          'YAML': 21
-        },
-        recentActivity: [
-          {
-            id: '1',
-            type: 'Symbol',
-            action: 'Created',
-            timestamp: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-            details: 'KnowledgeGraph component indexed'
-          },
-          {
-            id: '2',
-            type: 'ChangeSet',
-            action: 'Updated',
-            timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-            details: 'UI components refactored'
-          },
-          {
-            id: '3',
-            type: 'Decision',
-            action: 'Created',
-            timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-            details: 'Industrial cyberpunk theme adopted'
-          },
-          {
-            id: '4',
-            type: 'Symbol',
-            action: 'Created',
-            timestamp: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-            details: 'Analytics component implemented'
-          },
-          {
-            id: '5',
-            type: 'Run',
-            action: 'Executed',
-            timestamp: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-            details: 'Full codebase indexing completed'
-          }
-        ],
-        systemMetrics: {
-          memoryUsage: 67.3,
-          cpuUsage: 23.8,
-          diskUsage: 45.2,
-          uptime: '2h 34m'
-        },
-        indexingStats: {
-          filesIndexed: 156,
-          symbolsExtracted: 931,
-          lastIndexTime: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-          indexingSpeed: '47 files/sec'
-        }
-      };
-
-      setAnalytics(mockAnalytics);
+      const payload = await response.json();
+      setAnalytics(normalizeAnalytics(payload));
     } catch (err) {
-      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      const errorMsg = err instanceof Error ? err.message : 'Failed to fetch analytics data';
       setError(errorMsg);
       console.error('Failed to fetch analytics:', err);
-    } finally {
-      setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAnalytics();
+    // Initial load only - no intervals to prevent flickering
+    const initialLoad = async () => {
+      setLoading(true);
+      await fetchAnalytics();
+      setLoading(false);
+    };
     
-    // Refresh analytics every 30 seconds
-    const interval = setInterval(fetchAnalytics, 30000);
-    return () => clearInterval(interval);
-  }, []);
+    initialLoad();
+  }, [timeInterval]);
 
-  const refetch = () => {
+  const changeTimeInterval = (interval: string) => {
+    setTimeInterval(interval);
+    // Refresh data immediately when interval changes
     fetchAnalytics();
   };
 
@@ -143,6 +128,7 @@ export const useAnalytics = () => {
     analytics,
     loading,
     error,
-    refetch
+    timeInterval,
+    setTimeInterval: changeTimeInterval,
   };
 };
