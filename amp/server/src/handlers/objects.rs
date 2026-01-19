@@ -199,8 +199,8 @@ pub async fn create_object(
 
     tracing::info!("Creating object: {}", object_id);
 
-    // Use the payload directly as content
-    let query = "CREATE objects CONTENT $data";
+    // Create with explicit ID using backtick syntax
+    let query = format!("CREATE objects:`{}` CONTENT $data", object_id);
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
@@ -370,36 +370,26 @@ pub async fn get_object(
 pub async fn update_object(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Json(payload): Json<AmpObject>,
-) -> Result<StatusCode, StatusCode> {
-    let payload = apply_embedding(&state, payload).await;
-    let content = payload_to_content_value(&payload)?;
-    let object_id = extract_object_id(&payload);
-
-    if object_id != id {
-        tracing::warn!(
-            "Update rejected due to ID mismatch: path={}, payload={}",
-            id,
-            object_id
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
+    Json(payload): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
     tracing::info!("Updating object: {}", id);
 
-    let query = "UPDATE type::record('objects', $id) MERGE $data RETURN AFTER";
+    // Support partial updates - remove RETURN to avoid serialization issues
+    let query = format!("UPDATE objects:`{}` MERGE $data", id);
 
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
             .query(query)
-            .bind(("id", id))
-            .bind(("data", content)),
+            .bind(("data", payload)),
     )
     .await;
 
     match result {
-        Ok(Ok(_)) => Ok(StatusCode::NO_CONTENT),
+        Ok(Ok(_)) => {
+            tracing::info!("Object updated: {}", id);
+            Ok(Json(serde_json::json!({"success": true, "message": "Object updated"})))
+        }
         Ok(Err(e)) => {
             tracing::error!("Failed to update object {}: {}", id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)

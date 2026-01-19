@@ -50,16 +50,32 @@ pub async fn handle_amp_query(
 ) -> Result<Vec<Content>> {
     let mut query = serde_json::json!({
         "text": input.query,
-        "mode": input.mode,
         "limit": 10
     });
 
+    if input.mode == "hybrid" {
+        query["hybrid"] = serde_json::json!(true);
+    }
+
     if let Some(filters) = input.filters {
-        query["filters"] = filters;
+        if let Some(mut filters_obj) = filters.as_object().cloned() {
+            if let Some(type_value) = filters_obj.get_mut("type") {
+                if let Some(type_str) = type_value.as_str() {
+                    *type_value = serde_json::json!([type_str]);
+                }
+            }
+            if !filters_obj.is_empty() {
+                query["filters"] = serde_json::Value::Object(filters_obj);
+            }
+        }
     }
 
     if let Some(graph_opts) = input.graph_options {
-        query["graph"] = graph_opts;
+        if let Some(graph_obj) = graph_opts.as_object() {
+            if !graph_obj.is_empty() {
+                query["graph"] = serde_json::Value::Object(graph_obj.clone());
+            }
+        }
     }
 
     let result = client.query(query).await?;

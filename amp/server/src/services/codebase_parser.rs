@@ -226,7 +226,27 @@ impl CodebaseParser {
                 parser.set_language(self.typescript_language)?;
                 self.create_typescript_queries()?
             }
-            _ => return Err(anyhow!("Unsupported language: {}", language)),
+            _ => {
+                // For unsupported languages, return a basic file log without parsing
+                let mut hasher = Sha256::new();
+                hasher.update(&content);
+                let hash = format!("{:x}", hasher.finalize());
+                
+                return Ok(FileLog {
+                    path: file_path.to_string_lossy().to_string(),
+                    language: language.to_string(),
+                    last_indexed: chrono::Utc::now().to_rfc3339(),
+                    content_hash: hash,
+                    symbols: Vec::new(),
+                    dependencies: FileDependencies {
+                        imports: Vec::new(),
+                        exports: Vec::new(),
+                    },
+                    recent_changes: Vec::new(),
+                    linked_decisions: Vec::new(),
+                    notes: vec![format!("Language '{}' not yet supported for parsing", language)],
+                });
+            }
         };
         
         let tree = parser.parse(&content, None)

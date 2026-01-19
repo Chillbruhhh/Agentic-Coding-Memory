@@ -16,6 +16,14 @@
         "http://localhost:8051/mcp",
         "--allow-http"
       ]
+    },
+    "amp": {
+      "command": "/mnt/c/Users/Joshc/source/repos/ACM/amp/target/release/amp-mcp-server.exe",
+      "args": [],
+      "env": {
+        "AMP_SERVER_URL": "http://localhost:8105",
+        "RUST_LOG": "info"
+      }
     }
   }
 }

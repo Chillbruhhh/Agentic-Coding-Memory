@@ -21,15 +21,15 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     }
     
     // Create project root node first
-    let project_id = create_project_node(root_path, client).await?;
-    println!("📁 Created project node: {}", project_id);
+    let (project_object_id, project_id) = create_project_node(root_path, client).await?;
+    println!("📁 Created project node: {} (id: {})", project_id, project_object_id);
     
     let mut total_files = 0;
     let mut processed_files = 0;
     let mut created_symbols = 0;
     let mut created_directories = 0;
     let mut errors = Vec::new();
-    let mut warnings = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     
     // Default exclude patterns
     let mut exclude_patterns = vec![
@@ -88,7 +88,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                         let dir_key = relative_parent.to_string_lossy().to_string();
                         
                         if !created_dirs.contains(&dir_key) && !dir_key.is_empty() {
-                            match create_directory_node(parent, &project_id, client).await {
+                            match create_directory_node(parent, &project_object_id, &project_id, client).await {
                                 Ok(_dir_id) => {
                                     created_directories += 1;
                                     created_dirs.insert(dir_key);
@@ -127,7 +127,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     
     // Process each file and create hierarchical structure
     for file_path in files_to_process {
-        match process_file_hierarchical(&file_path, &project_id, client).await {
+        match process_file_hierarchical(&file_path, &project_object_id, &project_id, client).await {
             Ok(symbols_count) => {
                 processed_files += 1;
                 created_symbols += symbols_count;
@@ -226,7 +226,7 @@ async fn process_file(file_path: &Path, client: &AmpClient) -> Result<usize> {
     };
     
     // Create a basic Symbol object for the file
-    let symbol = create_file_symbol(file_path, &content)?;
+    let symbol = create_file_symbol(file_path, &content, "default-project")?;
     
     // Send to AMP server
     match client.create_object(symbol).await {
@@ -280,7 +280,7 @@ fn extract_name_from_composer_json(config_path: &Path) -> Option<String> {
     json_value.get("name")?.as_str().map(|s| s.to_string())
 }
 
-async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<String> {
+async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<(String, String)> {
     let now = Utc::now();
     let project_name = detect_project_name(root_path)
         .unwrap_or_else(|| {
@@ -296,13 +296,15 @@ async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<Str
         println!("📁 Using directory name as project name: {}", project_name);
     }
     
-    let project_id = Uuid::new_v4().to_string();
+    // Use project name as the project_id (sanitized)
+    let project_id = project_name.to_lowercase().replace(" ", "-");
+    let object_id = Uuid::new_v4().to_string();
     
     let project_symbol = json!({
-        "id": project_id.clone(),
+        "id": object_id.clone(),
         "type": "Symbol",
         "tenant_id": "default",
-        "project_id": "indexed-project",
+        "project_id": project_id.clone(),
         "created_at": now.to_rfc3339(),
         "updated_at": now.to_rfc3339(),
         "provenance": {
@@ -325,10 +327,10 @@ async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<Str
     // Small delay to ensure object is fully created
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     
-    Ok(project_id)
+    Ok((object_id, project_id))
 }
 
-async fn create_directory_node(dir_path: &Path, project_id: &str, client: &AmpClient) -> Result<String> {
+async fn create_directory_node(dir_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
     let dir_name = dir_path.file_name()
         .and_then(|n| n.to_str())
@@ -340,7 +342,7 @@ async fn create_directory_node(dir_path: &Path, project_id: &str, client: &AmpCl
         "id": dir_id.clone(),
         "type": "Symbol",
         "tenant_id": "default",
-        "project_id": "indexed-project",
+        "project_id": project_id,
         "created_at": now.to_rfc3339(),
         "updated_at": now.to_rfc3339(),
         "provenance": {
@@ -364,7 +366,7 @@ async fn create_directory_node(dir_path: &Path, project_id: &str, client: &AmpCl
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     
     // Create relationship: project contains directory
-    match client.create_relationship_direct(project_id, &dir_id, "defined_in").await {
+    match client.create_relationship_direct(project_object_id, &dir_id, "defined_in").await {
         Ok(_) => println!("✅ Created relationship: project contains {}", dir_name),
         Err(e) => println!("⚠️  Failed to create relationship: {}", e),
     }
@@ -372,27 +374,26 @@ async fn create_directory_node(dir_path: &Path, project_id: &str, client: &AmpCl
     Ok(dir_id)
 }
 
-async fn process_file_hierarchical(file_path: &Path, project_id: &str, client: &AmpClient) -> Result<usize> {
+async fn process_file_hierarchical(file_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
     println!("🔍 Processing file: {}", file_path.display());
     
     // First create a file node
-    let file_id = create_file_node(file_path, project_id, client).await?;
+    let file_id = create_file_node(file_path, project_object_id, project_id, client).await?;
     
     // Then try to parse symbols within the file
-    match use_codebase_parser_hierarchical(file_path, &file_id, client).await {
+    match use_codebase_parser_hierarchical(file_path, &file_id, project_id, client).await {
         Ok(count) => {
             println!("✅ Codebase parser created {} symbols", count);
             Ok(count + 1) // +1 for the file node itself
         },
         Err(e) => {
             println!("⚠️  Codebase parser failed ({}), file node created", e);
-            warnings.push(format!("Parser failed for {}: {}", file_path.display(), e));
             Ok(1) // Just the file node
         }
     }
 }
 
-async fn create_file_node(file_path: &Path, project_id: &str, client: &AmpClient) -> Result<String> {
+async fn create_file_node(file_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
     let file_name = file_path.file_name()
         .and_then(|n| n.to_str())
@@ -411,7 +412,7 @@ async fn create_file_node(file_path: &Path, project_id: &str, client: &AmpClient
         "id": file_id.clone(),
         "type": "Symbol",
         "tenant_id": "default",
-        "project_id": "indexed-project",
+        "project_id": project_id,
         "created_at": now.to_rfc3339(),
         "updated_at": now.to_rfc3339(),
         "provenance": {
@@ -435,7 +436,7 @@ async fn create_file_node(file_path: &Path, project_id: &str, client: &AmpClient
     tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
     
     // Create relationship: project contains file
-    match client.create_relationship_direct(project_id, &file_id, "defined_in").await {
+    match client.create_relationship_direct(project_object_id, &file_id, "defined_in").await {
         Ok(_) => println!("✅ Created relationship: project contains {}", file_name),
         Err(e) => println!("⚠️  Failed to create relationship: {}", e),
     }
@@ -443,7 +444,7 @@ async fn create_file_node(file_path: &Path, project_id: &str, client: &AmpClient
     Ok(file_id)
 }
 
-async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, client: &AmpClient) -> Result<usize> {
+async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
     // Convert to absolute path to avoid server working directory issues
     let absolute_path = file_path.canonicalize()
         .map_err(|e| anyhow::anyhow!("Failed to get absolute path: {}", e))?;
@@ -451,7 +452,7 @@ async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, clien
     // Use the codebase parser endpoint to get detailed symbols
     let parse_request = serde_json::json!({
         "file_path": absolute_path.to_string_lossy(),
-        "project_id": "indexed-project",
+        "project_id": project_id,
         "tenant_id": "default"
     });
     
@@ -468,7 +469,7 @@ async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, clien
                 // Create AMP Symbol objects for each parsed symbol with file relationship
                 let mut created_count = 0;
                 for symbol_data in symbols_array {
-                    if let Ok(amp_symbol) = create_amp_symbol_from_parsed_hierarchical(symbol_data, file_path, file_id) {
+                    if let Ok(amp_symbol) = create_amp_symbol_from_parsed_hierarchical(symbol_data, file_path, file_id, project_id) {
                         match client.create_object(amp_symbol.clone()).await {
                             Ok(_) => {
                                 created_count += 1;
@@ -495,7 +496,7 @@ async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, clien
     Ok(1)
 }
 
-fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, file_path: &Path, _file_id: &str) -> Result<serde_json::Value> {
+fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, file_path: &Path, _file_id: &str, project_id: &str) -> Result<serde_json::Value> {
     let now = chrono::Utc::now();
     
     let name = symbol_data.get("name")
@@ -526,7 +527,7 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
         "id": uuid::Uuid::new_v4().to_string(),
         "type": "Symbol",
         "tenant_id": "default",
-        "project_id": "indexed-project",
+        "project_id": project_id,
         "created_at": now.to_rfc3339(),
         "updated_at": now.to_rfc3339(),
         "provenance": {
@@ -547,7 +548,7 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
     Ok(symbol)
 }
 
-async fn create_simple_file_symbol(file_path: &Path, client: &AmpClient) -> Result<usize> {
+async fn create_simple_file_symbol(file_path: &Path, project_id: &str, client: &AmpClient) -> Result<usize> {
     // Read file content
     let content = match std::fs::read_to_string(file_path) {
         Ok(content) => content,
@@ -557,7 +558,7 @@ async fn create_simple_file_symbol(file_path: &Path, client: &AmpClient) -> Resu
     };
     
     // Create a basic Symbol object for the file
-    let symbol = create_file_symbol(file_path, &content)?;
+    let symbol = create_file_symbol(file_path, &content, project_id)?;
     
     // Send to AMP server
     match client.create_object(symbol).await {
@@ -566,7 +567,7 @@ async fn create_simple_file_symbol(file_path: &Path, client: &AmpClient) -> Resu
     }
 }
 
-pub fn create_file_symbol(file_path: &Path, content: &str) -> Result<Value> {
+pub fn create_file_symbol(file_path: &Path, content: &str, project_id: &str) -> Result<Value> {
     let now = Utc::now();
     let file_name = file_path.file_name()
         .and_then(|n| n.to_str())
@@ -587,7 +588,7 @@ pub fn create_file_symbol(file_path: &Path, content: &str) -> Result<Value> {
         "id": Uuid::new_v4().to_string(),
         "type": "Symbol",
         "tenant_id": "default",
-        "project_id": "indexed-project",
+        "project_id": project_id,
         "created_at": now.to_rfc3339(),
         "updated_at": now.to_rfc3339(),
         "provenance": {

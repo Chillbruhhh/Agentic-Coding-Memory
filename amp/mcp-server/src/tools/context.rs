@@ -19,18 +19,18 @@ pub async fn handle_amp_context(
 ) -> Result<Vec<Content>> {
     let mut query = serde_json::json!({
         "text": input.goal,
-        "mode": "hybrid",
+        "hybrid": true,
         "limit": 20
     });
 
-    let mut filters = serde_json::json!({});
+    let mut filters = serde_json::Map::new();
     
     if input.include_decisions {
-        filters["type"] = serde_json::json!("decision");
+        filters.insert("type".to_string(), serde_json::json!(["decision"]));
     }
 
-    if !filters.is_null() {
-        query["filters"] = filters;
+    if !filters.is_empty() {
+        query["filters"] = serde_json::Value::Object(filters);
     }
 
     let result = client.query(query).await?;

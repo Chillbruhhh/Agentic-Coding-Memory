@@ -6,7 +6,6 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use uuid::Uuid;
 
 use crate::services::codebase_parser::{CodebaseParser, FileLog};
 use crate::AppState;
@@ -28,9 +27,13 @@ pub struct ParseFileRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateFileLogRequest {
+    #[serde(alias = "path")]
     pub file_path: String,
+    #[serde(alias = "summary")]
     pub change_description: String,
+    #[serde(alias = "linked_changeset")]
     pub changeset_id: Option<String>,
+    #[serde(alias = "linked_run")]
     pub run_id: Option<String>,
     pub decision_id: Option<String>,
 }
@@ -140,25 +143,41 @@ pub async fn parse_file(
 
 /// Update file log with new change information
 pub async fn update_file_log(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Json(request): Json<UpdateFileLogRequest>,
-) -> Result<Json<FileLogResponse>, StatusCode> {
+) -> Result<Json<FileLogResponse>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Updating file log for: {}", request.file_path);
     
     // First, re-parse the file to get current state
     let parser = CodebaseParser::new()
         .map_err(|e| {
             tracing::error!("Failed to create parser: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create parser", "details": e.to_string()}))
+            )
         })?;
     
-    let file_path = PathBuf::from(&request.file_path);
+    // Resolve the file path
+    let file_path = match resolve_file_path(&request.file_path, &state) {
+        Ok(path) => path,
+        Err(_) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "File not found", "path": request.file_path}))
+            ));
+        }
+    };
+    
     let language = detect_language(&file_path);
     
     let mut file_log = parser.parse_file(&file_path, &language)
         .map_err(|e| {
             tracing::error!("Failed to parse file: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to parse file", "details": e.to_string()}))
+            )
         })?;
     
     // Add the change to recent changes
@@ -207,26 +226,44 @@ pub async fn get_file_logs(
 
 /// Get specific file log by path
 pub async fn get_file_log(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Path(file_path): Path<String>,
-) -> Result<Json<FileLogResponse>, StatusCode> {
+) -> Result<Json<FileLogResponse>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Getting file log for: {}", file_path);
+    
+    // Resolve the file path - try multiple strategies
+    let resolved_path = match resolve_file_path(&file_path, &state) {
+        Ok(path) => path,
+        Err(_) => {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "File not found", "path": file_path}))
+            ));
+        }
+    };
+    
+    tracing::debug!("Resolved path: {:?}", resolved_path);
     
     // TODO: Query the AMP database for the specific file log
     // For now, re-parse the file
     let parser = CodebaseParser::new()
         .map_err(|e| {
             tracing::error!("Failed to create parser: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to create parser", "details": e.to_string()}))
+            )
         })?;
     
-    let path = PathBuf::from(&file_path);
-    let language = detect_language(&path);
+    let language = detect_language(&resolved_path);
     
-    let file_log = parser.parse_file(&path, &language)
+    let file_log = parser.parse_file(&resolved_path, &language)
         .map_err(|e| {
             tracing::error!("Failed to parse file: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "Failed to parse file", "details": e.to_string()}))
+            )
         })?;
     
     let markdown = parser.generate_file_log_markdown(&file_log);
@@ -237,6 +274,49 @@ pub async fn get_file_log(
     }))
 }
 
+/// Resolve file path using multiple strategies
+fn resolve_file_path(file_path: &str, _state: &AppState) -> Result<PathBuf, StatusCode> {
+    // Strategy 1: Try as absolute path
+    let path = PathBuf::from(file_path);
+    if path.is_absolute() && path.exists() {
+        return Ok(path);
+    }
+    
+    // Strategy 2: Try relative to current working directory
+    if let Ok(cwd) = std::env::current_dir() {
+        let path = cwd.join(file_path);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    
+    // Strategy 3: Try relative to project root if configured
+    if let Ok(project_root) = std::env::var("PROJECT_ROOT") {
+        let path = PathBuf::from(project_root).join(file_path);
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+    
+    // Strategy 4: Try going up directories to find the file
+    if let Ok(cwd) = std::env::current_dir() {
+        let mut current = cwd.clone();
+        for _ in 0..5 {  // Try up to 5 levels up
+            let path = current.join(file_path);
+            if path.exists() {
+                return Ok(path);
+            }
+            if !current.pop() {
+                break;
+            }
+        }
+    }
+    
+    tracing::error!("Could not resolve file path: {}", file_path);
+    tracing::error!("Current directory: {:?}", std::env::current_dir());
+    Err(StatusCode::NOT_FOUND)
+}
+
 // Helper functions
 
 fn detect_language(file_path: &std::path::PathBuf) -> String {
@@ -244,6 +324,12 @@ fn detect_language(file_path: &std::path::PathBuf) -> String {
         match extension.to_string_lossy().as_ref() {
             "py" => "python".to_string(),
             "ts" | "tsx" => "typescript".to_string(),
+            "rs" => "rust".to_string(),
+            "js" | "jsx" => "javascript".to_string(),
+            "go" => "go".to_string(),
+            "java" => "java".to_string(),
+            "c" | "h" => "c".to_string(),
+            "cpp" | "cc" | "cxx" | "hpp" => "cpp".to_string(),
             _ => "unknown".to_string(),
         }
     } else {
