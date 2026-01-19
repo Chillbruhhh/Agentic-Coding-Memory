@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "cli", "ui/src-tauri"]
+members = ["server", "cli", "ui/src-tauri", "mcp-server"]
 resolver = "2"
 
 [workspace.dependencies]

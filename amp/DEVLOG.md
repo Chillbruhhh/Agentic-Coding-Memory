@@ -4,6 +4,66 @@
 **Timeline**: January 13-18, 2026  
 **Team**: Solo development for hackathon  
 
+## Day 6 - January 18, 2026 - MCP SERVER INTEGRATION
+
+### 8:00 PM - 9:00 PM - MCP Server Implementation (1 hour)
+**Objective**: Build Model Context Protocol server to expose AMP tools to AI agents
+
+**Implementation**:
+- Created complete MCP server using rmcp SDK v0.13.0
+- Implemented 10 focused tools across 5 categories
+- Built HTTP client wrapper for AMP API communication
+- Added comprehensive error handling and logging
+
+**Tools Implemented**:
+1. **Context & Retrieval** (3 tools)
+   - `amp_context` - High-signal memory bundle for tasks
+   - `amp_query` - Hybrid search (text+vector+graph)
+   - `amp_trace` - Provenance and relationship tracking
+
+2. **Memory Writes** (4 tools)
+   - `amp_write_decision` - ADR-style architectural decisions
+   - `amp_write_changeset` - Document completed work units
+   - `amp_run_start` - Begin execution tracking
+   - `amp_run_end` - Complete execution with outputs
+
+3. **File Intelligence** (2 tools)
+   - `amp_filelog_get` - Retrieve file logs
+   - `amp_filelog_update` - Update file after changes
+
+4. **Coordination** (2 tools)
+   - `amp_lease_acquire` - Resource locking for multi-agent coordination
+   - `amp_lease_release` - Release resource locks
+
+5. **Discovery** (2 tools)
+   - `amp_status` - Health and analytics
+   - `amp_list` - Browse objects by type
+
+**Architecture**:
+- Stdio transport for MCP protocol compliance
+- Async HTTP client with connection pooling
+- Modular tool organization by category
+- Comprehensive schema validation with schemars
+
+**Integration**:
+- Docker Compose configuration for full stack
+- Claude Desktop configuration examples
+- Build scripts for Linux/macOS/Windows
+- Comprehensive integration guide
+
+**Files Created**:
+- `amp/mcp-server/Cargo.toml` - Project configuration
+- `amp/mcp-server/src/main.rs` - MCP server entry point
+- `amp/mcp-server/src/amp_client.rs` - HTTP client wrapper
+- `amp/mcp-server/src/config.rs` - Configuration management
+- `amp/mcp-server/src/tools/*.rs` - Tool implementations
+- `amp/mcp-server/README.md` - Usage documentation
+- `amp/mcp-server/INTEGRATION.md` - Integration guide
+- `amp/docker-compose.yml` - Full stack orchestration
+- `scripts/build-mcp-server.{sh,ps1}` - Build scripts
+
+**Time Spent**: 1 hour of focused implementation
+
 ## Day 5 - January 17, 2026 - BREAKTHROUGH DAY + CODEBASE PARSER
 
 ### 6:00 AM - 9:20 AM - Critical Persistence Crisis Resolution (3 hours 20 minutes)

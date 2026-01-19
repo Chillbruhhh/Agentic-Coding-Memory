@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  amp-server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    ports:
+      - "8105:8105"
+    environment:
+      - PORT=8105
+      - BIND_ADDRESS=0.0.0.0
+      - DATABASE_URL=file:///data/amp.db
+      - RUST_LOG=info
+    volumes:
+      - amp-data:/data
+    networks:
+      - amp-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8105/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  amp-ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - VITE_AMP_SERVER_URL=http://amp-server:8105
+    depends_on:
+      - amp-server
+    networks:
+      - amp-network
+
+  amp-mcp-server:
+    build:
+      context: ./mcp-server
+      dockerfile: Dockerfile
+    environment:
+      - AMP_SERVER_URL=http://amp-server:8105
+      - AMP_SERVER_TIMEOUT=30
+      - RUST_LOG=info
+    depends_on:
+      - amp-server
+    networks:
+      - amp-network
+    stdin_open: true
+    tty: true
+
+volumes:
+  amp-data:
+
+networks:
+  amp-network:
+    driver: bridge
