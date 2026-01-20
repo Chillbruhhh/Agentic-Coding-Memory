@@ -3564,3 +3564,69 @@ language: {language}
 
 **Status**: 🚀 AMP now features AI-powered code understanding with advanced hybrid retrieval
 
+---
+
+### Early Morning - Knowledge Graph Rendering Fixes (45 minutes)
+**Objective**: Fix 3D force graph rendering issues and improve search UX
+
+**Problems Encountered**:
+
+**1. Graph Not Rendering - Tick Error** (20 minutes):
+- **Symptom**: `Cannot read properties of undefined (reading 'tick')` crash
+- **Root Cause**: Race condition in `3d-force-graph` library - d3 force simulation not initialized before animation loop starts ticking
+- **Failed Attempts**:
+  - Overriding `tickFrame` method to guard against missing layout
+  - Setting `warmupTicks(0)` and `cooldownTicks(200)`
+  - Using `requestAnimationFrame` delays
+- **Solution**: Switched from vanilla `3d-force-graph` to `react-force-graph-3d` wrapper with staged initialization:
+  - Added `mounted` state with 100ms delay before rendering graph
+  - Internal `graphData` state updated only after mount
+  - Set `warmupTicks={100}` to allow simulation initialization
+
+**2. Search Destroying Graph Layout** (25 minutes):
+- **Symptom**: Typing in search box removed non-matching nodes, collapsing graph structure
+- **Problem**: Filter logic was removing nodes from the graph entirely, breaking spatial relationships
+- **Solution**: Highlight/dim approach instead of filtering:
+  - Keep ALL nodes in graph at all times (layout stays stable)
+  - Calculate `highlightedNodeIds` Set based on search/filter criteria
+  - Pass to ForceGraph3D component for visual differentiation
+  - Matching nodes: full color, full size
+  - Non-matching nodes: 15% opacity color, 40% size
+  - Links: bright between matches, 2% opacity for dimmed connections
+  - Removed `layoutKey` trigger on search (only on type filter changes)
+
+**Technical Implementation**:
+
+```typescript
+// KnowledgeGraph.tsx - Highlight calculation
+const highlightedNodeIds = useMemo(() => {
+  const matchingNodes = graphData.nodes.filter(node => {
+    const typeMatch = visibleTypes.includes(node.kind);
+    const searchMatch = !hasSearch || node.name.toLowerCase().includes(searchQuery.toLowerCase());
+    return typeMatch && searchMatch;
+  });
+  return new Set(matchingNodes.map(n => n.id));
+}, [graphData, searchQuery, visibleTypes]);
+
+// ForceGraph3DComponent.tsx - Conditional styling
+const getNodeColorWithHighlight = useCallback((node: any) => {
+  const baseColor = node.color || getNodeColor(node.kind);
+  if (!hasActiveFilter) return baseColor;
+  return highlightedNodeIds?.has(node.id) ? baseColor : dimColor(baseColor, 0.15);
+}, [hasActiveFilter, highlightedNodeIds]);
+```
+
+**Results**:
+- ✅ Graph renders reliably without tick errors
+- ✅ Search highlights matching nodes while keeping layout intact
+- ✅ Smooth visual transitions on keystroke
+- ✅ Links dim/brighten based on connected node match state
+- ✅ Stats panel shows total vs matching node counts
+
+**Files Modified**:
+- `amp/ui/src/components/ForceGraph3DComponent.tsx` - React wrapper, highlight props
+- `amp/ui/src/components/KnowledgeGraph.tsx` - Highlight calculation, stable layout
+
+**Time Spent**: 45 minutes
+**Status**: ✅ Complete
+

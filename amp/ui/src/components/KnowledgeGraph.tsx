@@ -29,25 +29,34 @@ export const KnowledgeGraph: React.FC = () => {
     return transformAmpToGraph(objects, relationships);
   }, [objects, relationships]);
 
-  // Filter nodes based on search and type filters
-  const filteredData = useMemo(() => {
-    if (!graphData || !graphData.nodes || !graphData.links) {
-      return { nodes: [], links: [] };
+  // Calculate highlighted node IDs based on search and type filters
+  // We keep ALL nodes in the graph but highlight matching ones
+  const highlightedNodeIds = useMemo(() => {
+    if (!graphData || !graphData.nodes) {
+      return new Set<string>();
     }
-    
-    let filteredNodes = graphData.nodes.filter(node => 
-      visibleTypes.includes(node.kind) &&
-      (searchQuery === '' || node.name.toLowerCase().includes(searchQuery.toLowerCase()))
-    );
 
-    // Filter links to only include those between visible nodes
-    const visibleNodeIds = new Set(filteredNodes.map(n => n.id));
-    const filteredLinks = graphData.links.filter(link => 
-      visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target)
-    );
+    // If no search query and all types visible, highlight everything
+    const hasSearch = searchQuery !== '';
 
-    return { nodes: filteredNodes, links: filteredLinks };
+    const matchingNodes = graphData.nodes.filter(node => {
+      const typeMatch = visibleTypes.includes(node.kind);
+      const searchMatch = !hasSearch || node.name.toLowerCase().includes(searchQuery.toLowerCase());
+      return typeMatch && searchMatch;
+    });
+
+    return new Set(matchingNodes.map(n => n.id));
   }, [graphData, searchQuery, visibleTypes]);
+
+  // Count for stats display
+  const matchCount = useMemo(() => {
+    return {
+      nodes: highlightedNodeIds.size,
+      links: graphData.links.filter(link =>
+        highlightedNodeIds.has(link.source as string) && highlightedNodeIds.has(link.target as string)
+      ).length
+    };
+  }, [graphData, highlightedNodeIds]);
 
   const handleNodeClick = (node: GraphNode) => {
     setSelectedNode(node);
@@ -75,9 +84,11 @@ export const KnowledgeGraph: React.FC = () => {
     console.log('Reset camera');
   };
 
+  // Only reset layout when type filters change significantly, not on search
+  // This keeps the graph stable during search
   useEffect(() => {
     setLayoutKey(prev => prev + 1);
-  }, [searchQuery, visibleTypes.join('|')]);
+  }, [visibleTypes.join('|')]);
 
   useEffect(() => {
     if (!selectedNode || !['file', 'directory'].includes(selectedNode.kind)) {
@@ -157,16 +168,18 @@ export const KnowledgeGraph: React.FC = () => {
           onFilterChange={handleFilterChange}
           onResetCamera={handleResetCamera}
         />
-        <GraphLegend nodes={filteredData.nodes} />
+        <GraphLegend nodes={graphData.nodes} />
       </div>
 
       {/* Stats Panel */}
       <div className="absolute bottom-4 left-4 z-20 bg-panel-dark border border-border-dark rounded p-3">
         <div className="text-xs text-slate-400 space-y-1">
-          <div>Nodes: <span className="text-primary font-mono">{filteredData.nodes.length}</span></div>
-          <div>Links: <span className="text-primary font-mono">{filteredData.links.length}</span></div>
+          <div>Total: <span className="text-slate-500 font-mono">{graphData.nodes.length}</span></div>
           {searchQuery && (
-            <div>Search: <span className="text-yellow-400">"{searchQuery}"</span></div>
+            <>
+              <div>Matching: <span className="text-primary font-mono">{matchCount.nodes}</span></div>
+              <div>Search: <span className="text-yellow-400">"{searchQuery}"</span></div>
+            </>
           )}
         </div>
       </div>
@@ -258,7 +271,8 @@ export const KnowledgeGraph: React.FC = () => {
 
       {/* 3D Force Graph */}
       <ForceGraph3DComponent
-        data={filteredData}
+        data={graphData}
+        highlightedNodeIds={highlightedNodeIds}
         onNodeClick={handleNodeClick}
         onNodeHover={handleNodeHover}
         onLinkHover={handleLinkHover}
