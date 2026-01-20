@@ -1,5 +1,6 @@
 use axum::{extract::State, http::StatusCode, response::Json};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer};
+use serde::de::Error as SerdeError;
 use serde_json::Value;
 use uuid::Uuid;
 use tokio::time::{timeout, Duration};
@@ -13,6 +14,8 @@ pub struct QueryRequest {
     pub graph: Option<GraphQuery>,
     pub limit: Option<usize>,
     pub hybrid: Option<bool>,
+    pub graph_intersect: Option<bool>,
+    pub graph_autoseed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -27,11 +30,13 @@ pub struct QueryFilters {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GraphQuery {
+    #[serde(deserialize_with = "deserialize_uuidish_vec")]
     pub start_nodes: Vec<Uuid>,
     pub relation_types: Option<Vec<String>>,
     pub max_depth: Option<usize>,
     pub direction: Option<GraphDirection>,
     pub algorithm: Option<TraversalAlgorithm>,
+    #[serde(default, deserialize_with = "deserialize_uuidish_opt")]
     pub target_node: Option<Uuid>, // For shortest path algorithm
 }
 
@@ -57,6 +62,12 @@ pub struct QueryResponse {
     pub trace_id: Uuid,
     pub total_count: usize,
     pub execution_time_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_results_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vector_results_count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_results_count: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,6 +110,9 @@ pub async fn query(
                     trace_id,
                     total_count: hybrid_response.total_count,
                     execution_time_ms: hybrid_response.execution_time_ms,
+                    text_results_count: Some(hybrid_response.text_results_count),
+                    vector_results_count: Some(hybrid_response.vector_results_count),
+                    graph_results_count: Some(hybrid_response.graph_results_count),
                 }));
             }
             Err(e) => {
@@ -118,10 +132,11 @@ pub async fn query(
             }
         }
         
-        // Check if this is a multi-hop query (algorithm specified and depth > 1)
-        let is_multi_hop = graph.algorithm.is_some() && graph.max_depth.unwrap_or(1) > 1;
+        // Use graph service for algorithms or multi-relation traversals.
+        let use_graph_service = graph.algorithm.is_some()
+            || graph.relation_types.as_ref().map(|types| types.len() > 1).unwrap_or(false);
         
-        if is_multi_hop {
+        if use_graph_service {
             tracing::info!("Executing multi-hop graph traversal: algorithm={:?}, depth={}", 
                 graph.algorithm, graph.max_depth.unwrap_or(1));
             
@@ -158,6 +173,9 @@ pub async fn query(
                         trace_id,
                         total_count,
                         execution_time_ms,
+                        text_results_count: None,
+                        vector_results_count: None,
+                        graph_results_count: None,
                     }));
                 }
                 Err(e) => {
@@ -241,18 +259,24 @@ pub async fn query(
             trace_id,
             total_count,
             execution_time_ms,
+            text_results_count: None,
+            vector_results_count: None,
+            graph_results_count: None,
         }));
     }
-    
+
     // Determine if we should use vector search
+    tracing::info!("Non-hybrid query: determining query vector, embedding_enabled={}", state.embedding_service.is_enabled());
     let query_vector = if let Some(vector) = &request.vector {
+        tracing::info!("Using provided vector");
         Some(vector.clone())
     } else if let Some(text) = &request.text {
         // Generate embedding from text query if service is enabled
         if state.embedding_service.is_enabled() {
+            tracing::info!("Generating embedding for text: '{}'", text);
             match state.embedding_service.generate_embedding(text).await {
                 Ok(vec) => {
-                    tracing::debug!("Generated embedding from text query");
+                    tracing::info!("Generated embedding from text query: {} dimensions", vec.len());
                     Some(vec)
                 }
                 Err(e) => {
@@ -261,20 +285,26 @@ pub async fn query(
                 }
             }
         } else {
+            tracing::info!("Embedding service disabled");
             None
         }
     } else {
+        tracing::info!("No text or vector provided");
         None
     };
     
     // Build query based on whether we have a vector
     let query_str = if query_vector.is_some() {
+        tracing::info!("Building vector query");
         build_vector_query_string(&request, &query_vector.as_ref().unwrap())
     } else {
+        tracing::info!("Building text query");
         build_query_string(&request)
     };
-    
-    tracing::debug!("Executing query: {}", query_str);
+
+    tracing::info!("Executing query length: {} chars", query_str.len());
+    // Log a hash of the query for debugging
+    tracing::debug!("Full query: {}", query_str);
     
     // Execute with timeout
     let query_result = timeout(
@@ -328,6 +358,9 @@ pub async fn query(
         trace_id,
         total_count,
         execution_time_ms,
+        text_results_count: None,
+        vector_results_count: None,
+        graph_results_count: None,
     }))
 }
 
@@ -390,10 +423,7 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     
-    let mut query = format!(
-        "SELECT *, vector::similarity::cosine(embedding, [{}]) AS similarity FROM objects WHERE embedding IS NOT NULL",
-        vector_str
-    );
+    let mut inner_query = "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding FROM objects WHERE embedding IS NOT NONE AND embedding IS NOT NULL".to_string();
     
     let mut conditions = Vec::new();
     
@@ -426,23 +456,27 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
     
     // Add additional conditions
     if !conditions.is_empty() {
-        query.push_str(" AND ");
-        query.push_str(&conditions.join(" AND "));
+        inner_query.push_str(" AND ");
+        inner_query.push_str(&conditions.join(" AND "));
     }
-    
-    // Order by similarity
-    query.push_str(" ORDER BY similarity DESC");
     
     // Limit
     let limit = request.limit.unwrap_or(10);
-    query.push_str(&format!(" LIMIT {}", limit));
+    let inner_ranked_query = format!(
+        "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding, vector::similarity::cosine(embedding, [{}]) AS similarity FROM ({}) ORDER BY similarity DESC LIMIT {}",
+        vector_str, inner_query, limit
+    );
     
-    query
+    format!(
+        "SELECT VALUE {{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding, similarity: similarity }} FROM ({})",
+        inner_ranked_query
+    )
 }
 
 fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, limit: usize) -> String {
     let direction = graph.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
     let max_depth = graph.max_depth.unwrap_or(3);
+    let projection = "{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding }";
     
     // Build the start node list
     let start_ids_list = graph.start_nodes.iter()
@@ -452,9 +486,22 @@ fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, 
     
     // Build relationship list
     let relation_list = if let Some(types) = &graph.relation_types {
-        types.join(", ")
+        types.clone()
     } else {
-        "depends_on, defined_in, calls, justified_by, modifies, implements, produced".to_string()
+        vec![
+            "depends_on".to_string(),
+            "defined_in".to_string(),
+            "calls".to_string(),
+            "justified_by".to_string(),
+            "modifies".to_string(),
+            "implements".to_string(),
+            "produced".to_string(),
+        ]
+    };
+    let relation_clause = if relation_list.len() == 1 {
+        relation_list[0].clone()
+    } else {
+        format!("({})", relation_list.join("|"))
     };
     
     // Build recursive syntax based on algorithm
@@ -481,18 +528,18 @@ fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, 
             match direction {
                 GraphDirection::Outbound => {
                     if max_depth <= 1 {
-                        format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                        format!("SELECT VALUE {{ connected: ->{}->objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                     } else {
                         // Multi-hop simulation: traverse multiple levels and collect unique results
-                        format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                        format!("SELECT VALUE {{ connected: ->{}->objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                     }
                 }
                 GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
-                        relation_list, relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM {}", 
+                        relation_clause, projection, relation_clause, projection, start_ids_list)
                 }
             }
         }
@@ -500,14 +547,14 @@ fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, 
             // For path algorithm, fall back to simple traversal for now
             match direction {
                 GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: ->{}->objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
-                        relation_list, relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM {}", 
+                        relation_clause, projection, relation_clause, projection, start_ids_list)
                 }
             }
         }
@@ -515,14 +562,14 @@ fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, 
             // For shortest path, fall back to simple traversal for now
             match direction {
                 GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: ->{}->objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
-                        relation_list, relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM {}", 
+                        relation_clause, projection, relation_clause, projection, start_ids_list)
                 }
             }
         }
@@ -530,14 +577,14 @@ fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, 
             // No algorithm specified - use simple depth traversal (backward compatibility)
             match direction {
                 GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: ->{}->objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM {}", relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM {}", relation_clause, projection, start_ids_list)
                 }
                 GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM {}", 
-                        relation_list, relation_list, start_ids_list)
+                    format!("SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM {}", 
+                        relation_clause, projection, relation_clause, projection, start_ids_list)
                 }
             }
         }
@@ -673,5 +720,38 @@ fn generate_explanation(obj: &Value, request: &QueryRequest) -> String {
         "Matched query criteria".to_string()
     } else {
         parts.join("; ")
+    }
+}
+
+fn parse_uuidish(input: &str) -> Option<Uuid> {
+    Uuid::parse_str(input.trim_start_matches("objects:")).ok()
+}
+
+fn deserialize_uuidish_vec<'de, D>(deserializer: D) -> Result<Vec<Uuid>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Vec::<String>::deserialize(deserializer)?;
+    let mut ids = Vec::with_capacity(raw.len());
+    for value in raw {
+        let id = parse_uuidish(&value)
+            .ok_or_else(|| D::Error::custom(format!("invalid uuid: {}", value)))?;
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn deserialize_uuidish_opt<'de, D>(deserializer: D) -> Result<Option<Uuid>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    match raw {
+        Some(value) => {
+            let id = parse_uuidish(&value)
+                .ok_or_else(|| D::Error::custom(format!("invalid uuid: {}", value)))?;
+            Ok(Some(id))
+        }
+        None => Ok(None),
     }
 }

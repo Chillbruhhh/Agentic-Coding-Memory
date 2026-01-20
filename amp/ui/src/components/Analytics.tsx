@@ -1,6 +1,6 @@
 import { useAnalytics } from '../hooks/useAnalytics';
 import React from 'react';
-import { HiTrendingUp, HiExclamation, HiRefresh } from 'react-icons/hi';
+import { HiTrendingUp, HiExclamation } from 'react-icons/hi';
 import { BiLineChart } from 'react-icons/bi';
 
 export const Analytics: React.FC = () => {
@@ -108,34 +108,6 @@ export const Analytics: React.FC = () => {
             Sector Analytics
           </h2>
           <p className="text-stone-500 text-sm font-mono">:: MONITORING CORE SYSTEMS ::</p>
-        </div>
-        <div className="flex items-center bg-[#171514] p-1 border border-stone-800 shadow-inner">
-          <button 
-            onClick={() => setTimeInterval('1h')}
-            className={`px-3 py-1.5 text-xs font-bold font-mono transition-all uppercase ${
-              timeInterval === '1h' 
-                ? 'bg-[#2a2522] border border-stone-700 text-primary shadow-sm' 
-                : 'text-stone-500 hover:text-stone-300 hover:bg-stone-800'
-            }`}
-          >
-            1h
-          </button>
-          <button className="px-3 py-1.5 text-xs font-medium font-mono transition-all text-stone-500 hover:text-stone-300 hover:bg-stone-800 uppercase">
-            6h
-          </button>
-          <button className="px-3 py-1.5 text-xs font-medium font-mono transition-all text-stone-500 hover:text-stone-300 hover:bg-stone-800 uppercase">
-            24h
-          </button>
-          <button className="px-3 py-1.5 text-xs font-medium font-mono transition-all text-stone-500 hover:text-stone-300 hover:bg-stone-800 uppercase">
-            7d
-          </button>
-          <div className="w-px h-4 bg-stone-700 mx-2"></div>
-          <button 
-            onClick={() => {}} // No-op since we have auto-refresh
-            className="px-3 py-1.5 text-xs font-medium rounded-none transition-all text-stone-500 hover:text-stone-300 hover:bg-stone-800 flex items-center gap-1"
-          >
-            <HiRefresh className="text-sm" />
-          </button>
         </div>
       </div>
 

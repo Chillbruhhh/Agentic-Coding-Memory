@@ -125,3 +125,51 @@ DEFINE FIELD created_at ON leases TYPE datetime DEFAULT time::now();
 DEFINE INDEX idx_leases_resource ON leases COLUMNS resource;
 DEFINE INDEX idx_leases_holder ON leases COLUMNS holder;
 DEFINE INDEX idx_leases_expires ON leases COLUMNS expires_at;
+
+-- FileChunk table for chunked file content
+DEFINE TABLE file_chunks SCHEMAFULL;
+DEFINE FIELD id ON file_chunks TYPE record<file_chunks>;
+DEFINE FIELD file_path ON file_chunks TYPE string;
+DEFINE FIELD chunk_index ON file_chunks TYPE int;
+DEFINE FIELD start_line ON file_chunks TYPE int;
+DEFINE FIELD end_line ON file_chunks TYPE int;
+DEFINE FIELD token_count ON file_chunks TYPE int;
+DEFINE FIELD content ON file_chunks TYPE string;
+DEFINE FIELD content_hash ON file_chunks TYPE string;
+DEFINE FIELD language ON file_chunks TYPE string;
+DEFINE FIELD embedding ON file_chunks TYPE option<array<float>>;
+DEFINE FIELD file_id ON file_chunks TYPE string;
+DEFINE FIELD tenant_id ON file_chunks TYPE string;
+DEFINE FIELD project_id ON file_chunks TYPE string;
+DEFINE FIELD created_at ON file_chunks TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON file_chunks TYPE datetime DEFAULT time::now();
+
+-- Indexes for file_chunks
+DEFINE INDEX idx_file_chunks_path ON file_chunks COLUMNS file_path;
+DEFINE INDEX idx_file_chunks_hash ON file_chunks COLUMNS content_hash;
+DEFINE INDEX idx_file_chunks_file_id ON file_chunks COLUMNS file_id;
+DEFINE INDEX idx_file_chunks_embedding ON file_chunks COLUMNS embedding MTREE DIMENSION 1536;
+
+-- FileLog table for semantic file summaries
+DEFINE TABLE file_logs SCHEMAFULL;
+DEFINE FIELD id ON file_logs TYPE record<file_logs>;
+DEFINE FIELD file_path ON file_logs TYPE string;
+DEFINE FIELD file_id ON file_logs TYPE string;
+DEFINE FIELD summary ON file_logs TYPE string;
+DEFINE FIELD purpose ON file_logs TYPE option<string>;
+DEFINE FIELD key_symbols ON file_logs TYPE array<string>;
+DEFINE FIELD dependencies ON file_logs TYPE array<string>;
+DEFINE FIELD notes ON file_logs TYPE option<string>;
+DEFINE FIELD embedding ON file_logs TYPE option<array<float>>;
+DEFINE FIELD last_modified ON file_logs TYPE datetime;
+DEFINE FIELD change_count ON file_logs TYPE int DEFAULT 0;
+DEFINE FIELD linked_changesets ON file_logs TYPE array<string>;
+DEFINE FIELD tenant_id ON file_logs TYPE string;
+DEFINE FIELD project_id ON file_logs TYPE string;
+DEFINE FIELD created_at ON file_logs TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON file_logs TYPE datetime DEFAULT time::now();
+
+-- Indexes for file_logs
+DEFINE INDEX idx_file_logs_path ON file_logs COLUMNS file_path;
+DEFINE INDEX idx_file_logs_file_id ON file_logs COLUMNS file_id;
+DEFINE INDEX idx_file_logs_embedding ON file_logs COLUMNS embedding MTREE DIMENSION 1536;

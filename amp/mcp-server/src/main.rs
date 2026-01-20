@@ -175,6 +175,16 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
+                    name: "amp_file_content_get".into(),
+                    description: Some("Get stored file content from indexed chunks".into()),
+                    input_schema: to_schema(schemars::schema_for!(tools::files::AmpFileContentGetInput)),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
                     name: "amp_lease_acquire".into(),
                     description: Some("Acquire a resource lease for coordination".into()),
                     input_schema: to_schema(schemars::schema_for!(tools::coordination::AmpLeaseAcquireInput)),
@@ -274,6 +284,12 @@ impl ServerHandler for AmpMcpHandler {
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
                 tools::files::handle_filelog_update(client, input).await.map_err(to_internal_error)?
+            }
+            "amp_file_content_get" => {
+                let input: tools::files::AmpFileContentGetInput = 
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::files::handle_file_content_get(client, input).await.map_err(to_internal_error)?
             }
             "amp_lease_acquire" => {
                 let input: tools::coordination::AmpLeaseAcquireInput = 

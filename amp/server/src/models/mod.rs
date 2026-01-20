@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 pub mod relationships;
 pub mod analytics;
+pub mod settings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseObject {
@@ -27,6 +28,8 @@ pub enum ObjectType {
     Decision,
     Changeset,
     Run,
+    FileChunk,
+    FileLog,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,4 +190,37 @@ pub enum AmpObject {
     Decision(Decision),
     ChangeSet(ChangeSet),
     Run(Run),
+    FileChunk(FileChunk),
+    FileLog(FileLog),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileChunk {
+    #[serde(flatten)]
+    pub base: BaseObject,
+    pub file_path: String,
+    pub chunk_index: u32,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub token_count: u32,
+    pub content: String,
+    pub content_hash: String,
+    pub language: String,
+    pub file_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileLog {
+    #[serde(flatten)]
+    pub base: BaseObject,
+    pub file_path: String,
+    pub file_id: String,
+    pub summary: String,
+    pub purpose: Option<String>,
+    pub key_symbols: Vec<String>,
+    pub dependencies: Vec<String>,
+    pub notes: Option<String>,
+    pub last_modified: String,
+    pub change_count: u32,
+    pub linked_changesets: Vec<String>,
 }

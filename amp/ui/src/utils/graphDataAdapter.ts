@@ -74,7 +74,7 @@ export const transformAmpToGraph = (
 ): GraphData => {
   // Filter for code symbols AND files/projects to show the full hierarchy
   const codeSymbolKinds = ['function', 'class', 'method', 'variable', 'interface'];
-  const allowedTypes = ['Symbol'];
+  const allowedTypes = ['symbol', 'Symbol']; // Support both cases
   const allowedKinds = [...codeSymbolKinds, 'file', 'project', 'directory'];
   
   const nodes: GraphNode[] = objects

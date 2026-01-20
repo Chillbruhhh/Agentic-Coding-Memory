@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::collections::{HashSet, VecDeque, BinaryHeap};
+use std::collections::{HashMap, HashSet, VecDeque, BinaryHeap};
 use uuid::Uuid;
 use serde_json::Value;
 use serde::{Deserialize, Serialize};
@@ -29,6 +29,7 @@ pub struct TraversalResult {
     pub nodes: Vec<Value>,
     pub paths: Option<Vec<Vec<Uuid>>>,
     pub total_count: usize,
+    pub node_depths: Option<HashMap<String, usize>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -66,11 +67,31 @@ impl GraphTraversalService {
             }
         }
     }
+
+    fn relation_list(&self, query: &GraphQuery) -> Vec<String> {
+        match &query.relation_types {
+            Some(types) if !types.is_empty() => types.clone(),
+            _ => vec![
+                "depends_on".to_string(),
+                "defined_in".to_string(),
+                "calls".to_string(),
+                "justified_by".to_string(),
+                "modifies".to_string(),
+                "implements".to_string(),
+                "produced".to_string(),
+            ],
+        }
+    }
+
+    fn format_relation_clause(&self, relation: &str) -> String {
+        relation.to_string()
+    }
     
     async fn execute_collect_traversal(&self, query: &GraphQuery, max_depth: usize) -> Result<TraversalResult, GraphTraversalError> {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::new();
         let mut all_nodes = Vec::new();
+        let mut node_depths: HashMap<String, usize> = HashMap::new();
         
         // Initialize with start nodes
         for start_id in &query.start_nodes {
@@ -79,94 +100,100 @@ impl GraphTraversalService {
         }
         
         let direction = query.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
-        let relation_list = if let Some(types) = &query.relation_types {
-            types.join(", ")
-        } else {
-            "depends_on, defined_in, calls, justified_by, modifies, implements, produced".to_string()
-        };
+        let relation_list = self.relation_list(query);
         
         while let Some((current_id, depth)) = queue.pop_front() {
             if depth >= max_depth {
                 continue;
             }
             
-            // Build query for current node's neighbors
-            let query_str = match direction {
-                GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM objects:`{}`", relation_list, current_id)
-                }
-                GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM objects:`{}`", relation_list, current_id)
-                }
-                GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM objects:`{}`", 
-                        relation_list, relation_list, current_id)
-                }
-            };
-            
-            tracing::debug!("Collect traversal query at depth {}: {}", depth, query_str);
-            
-            let query_result = timeout(
-                Duration::from_secs(5),
-                self.db.client.query(query_str)
-            ).await;
-            
-            let connected_nodes: Vec<Value> = match query_result {
-                Ok(Ok(mut response)) => {
-                    let raw_results: Vec<Value> = take_json_values(&mut response, 0);
-                    
-                    // Extract connected objects
-                    let mut connected = raw_results
-                        .into_iter()
-                        .filter_map(|v| {
-                            if let Some(obj) = v.as_object() {
-                                if direction == &GraphDirection::Both {
-                                    // Handle both directions
-                                    let mut nodes = Vec::new();
-                                    if let Some(outbound) = obj.get("outbound") {
-                                        if let Some(arr) = outbound.as_array() {
-                                            nodes.extend(arr.clone());
-                                        } else {
-                                            nodes.push(outbound.clone());
+            let projection = "{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding }";
+
+            let mut connected_nodes: Vec<Value> = Vec::new();
+            for relation in &relation_list {
+                let relation_clause = self.format_relation_clause(relation);
+                let query_str = match direction {
+                    GraphDirection::Outbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: ->{}->objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current_id
+                        )
+                    }
+                    GraphDirection::Inbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current_id
+                        )
+                    }
+                    GraphDirection::Both => {
+                        format!(
+                            "SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, relation_clause, projection, current_id
+                        )
+                    }
+                };
+                
+                tracing::debug!("Collect traversal query at depth {}: {}", depth, query_str);
+                
+                let query_result = timeout(
+                    Duration::from_secs(5),
+                    self.db.client.query(query_str)
+                ).await;
+                
+                let mut connected: Vec<Value> = match query_result {
+                    Ok(Ok(mut response)) => {
+                        let raw_results: Vec<Value> = take_json_values(&mut response, 0);
+                        
+                        raw_results
+                            .into_iter()
+                            .filter_map(|v| {
+                                if let Some(obj) = v.as_object() {
+                                    if direction == &GraphDirection::Both {
+                                        let mut nodes = Vec::new();
+                                        if let Some(outbound) = obj.get("outbound") {
+                                            if let Some(arr) = outbound.as_array() {
+                                                nodes.extend(arr.clone());
+                                            } else {
+                                                nodes.push(outbound.clone());
+                                            }
                                         }
-                                    }
-                                    if let Some(inbound) = obj.get("inbound") {
-                                        if let Some(arr) = inbound.as_array() {
-                                            nodes.extend(arr.clone());
-                                        } else {
-                                            nodes.push(inbound.clone());
+                                        if let Some(inbound) = obj.get("inbound") {
+                                            if let Some(arr) = inbound.as_array() {
+                                                nodes.extend(arr.clone());
+                                            } else {
+                                                nodes.push(inbound.clone());
+                                            }
                                         }
+                                        Some(nodes)
+                                    } else {
+                                        obj.get("connected").map(|v| {
+                                            if let Some(arr) = v.as_array() {
+                                                arr.clone()
+                                            } else {
+                                                vec![v.clone()]
+                                            }
+                                        })
                                     }
-                                    Some(nodes)
                                 } else {
-                                    // Handle single direction
-                                    obj.get("connected").map(|v| {
-                                        if let Some(arr) = v.as_array() {
-                                            arr.clone()
-                                        } else {
-                                            vec![v.clone()]
-                                        }
-                                    })
+                                    None
                                 }
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                        .collect::<Vec<_>>();
-                    
-                    normalize_object_ids(&mut connected);
-                    connected
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("Database error in collect traversal: {}", e);
-                    return Err(GraphTraversalError::DatabaseError(e.to_string()));
-                }
-                Err(_) => {
-                    tracing::error!("Timeout in collect traversal");
-                    return Err(GraphTraversalError::Timeout);
-                }
-            };
+                            })
+                            .flatten()
+                            .collect::<Vec<_>>()
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!("Database error in collect traversal: {}", e);
+                        return Err(GraphTraversalError::DatabaseError(e.to_string()));
+                    }
+                    Err(_) => {
+                        tracing::error!("Timeout in collect traversal");
+                        return Err(GraphTraversalError::Timeout);
+                    }
+                };
+                
+                normalize_object_ids(&mut connected);
+                connected_nodes.extend(connected);
+            }
             
             // Process connected nodes
             for node in connected_nodes {
@@ -175,6 +202,7 @@ impl GraphTraversalService {
                         if !visited.contains(&node_id) {
                             visited.insert(node_id);
                             queue.push_back((node_id, depth + 1));
+                            node_depths.entry(node_id_str.to_string()).or_insert(depth + 1);
                             all_nodes.push(node);
                         }
                     }
@@ -186,6 +214,7 @@ impl GraphTraversalService {
             total_count: all_nodes.len(),
             nodes: all_nodes,
             paths: None,
+            node_depths: Some(node_depths),
         })
     }
     
@@ -241,6 +270,7 @@ impl GraphTraversalService {
             total_count: all_nodes.len(),
             nodes: all_nodes,
             paths: Some(all_paths),
+            node_depths: None,
         })
     }
     
@@ -249,11 +279,7 @@ impl GraphTraversalService {
         let mut stack = vec![(start_id, vec![start_id], 1)]; // (current_id, path, depth)
         
         let direction = query.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
-        let relation_list = if let Some(types) = &query.relation_types {
-            types.join(", ")
-        } else {
-            "depends_on, defined_in, calls, justified_by, modifies, implements, produced".to_string()
-        };
+        let relation_list = self.relation_list(query);
         
         while let Some((current_id, current_path, depth)) = stack.pop() {
             // Add current path to results
@@ -263,62 +289,71 @@ impl GraphTraversalService {
                 continue;
             }
             
-            // Build query for current node's neighbors
-            let query_str = match direction {
-                GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM objects:`{}`", relation_list, current_id)
-                }
-                GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM objects:`{}`", relation_list, current_id)
-                }
-                GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM objects:`{}`", 
-                        relation_list, relation_list, current_id)
-                }
-            };
-            
-            let query_result = timeout(
-                Duration::from_secs(5),
-                self.db.client.query(query_str)
-            ).await;
-            
-            let connected_nodes: Vec<Uuid> = match query_result {
-                Ok(Ok(mut response)) => {
-                    let raw_results: Vec<Value> = take_json_values(&mut response, 0);
-                    
-                    raw_results
-                        .into_iter()
-                        .filter_map(|v| {
-                            if let Some(obj) = v.as_object() {
-                                let mut node_ids = Vec::new();
-                                
-                                if direction == &GraphDirection::Both {
-                                    // Handle both directions
-                                    if let Some(outbound) = obj.get("outbound") {
-                                        if let Some(arr) = outbound.as_array() {
-                                            for node in arr {
-                                                if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
-                                                    if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                        node_ids.push(node_id);
+            let projection = "{ id: string::concat(id) }";
+
+            let mut connected_nodes: Vec<Uuid> = Vec::new();
+            for relation in &relation_list {
+                let relation_clause = self.format_relation_clause(relation);
+                let query_str = match direction {
+                    GraphDirection::Outbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: ->{}->objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current_id
+                        )
+                    }
+                    GraphDirection::Inbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current_id
+                        )
+                    }
+                    GraphDirection::Both => {
+                        format!(
+                            "SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, relation_clause, projection, current_id
+                        )
+                    }
+                };
+                
+                let query_result = timeout(
+                    Duration::from_secs(5),
+                    self.db.client.query(query_str)
+                ).await;
+                
+                let mut node_ids: Vec<Uuid> = match query_result {
+                    Ok(Ok(mut response)) => {
+                        let raw_results: Vec<Value> = take_json_values(&mut response, 0);
+                        
+                        raw_results
+                            .into_iter()
+                            .filter_map(|v| {
+                                if let Some(obj) = v.as_object() {
+                                    let mut ids = Vec::new();
+                                    
+                                    if direction == &GraphDirection::Both {
+                                        if let Some(outbound) = obj.get("outbound") {
+                                            if let Some(arr) = outbound.as_array() {
+                                                for node in arr {
+                                                    if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
+                                                        if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
+                                                            ids.push(node_id);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                    if let Some(inbound) = obj.get("inbound") {
-                                        if let Some(arr) = inbound.as_array() {
-                                            for node in arr {
-                                                if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
-                                                    if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                        node_ids.push(node_id);
+                                        if let Some(inbound) = obj.get("inbound") {
+                                            if let Some(arr) = inbound.as_array() {
+                                                for node in arr {
+                                                    if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
+                                                        if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
+                                                            ids.push(node_id);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                } else {
-                                    // Handle single direction
-                                    if let Some(connected) = obj.get("connected") {
+                                    } else if let Some(connected) = obj.get("connected") {
                                         let nodes = if let Some(arr) = connected.as_array() {
                                             arr.clone()
                                         } else {
@@ -328,30 +363,32 @@ impl GraphTraversalService {
                                         for node in nodes {
                                             if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
                                                 if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                    node_ids.push(node_id);
+                                                    ids.push(node_id);
                                                 }
                                             }
                                         }
                                     }
+                                    
+                                    Some(ids)
+                                } else {
+                                    None
                                 }
-                                
-                                Some(node_ids)
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                        .collect()
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("Database error in path finding: {}", e);
-                    return Err(GraphTraversalError::DatabaseError(e.to_string()));
-                }
-                Err(_) => {
-                    tracing::error!("Timeout in path finding");
-                    return Err(GraphTraversalError::Timeout);
-                }
-            };
+                            })
+                            .flatten()
+                            .collect()
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!("Database error in path finding: {}", e);
+                        return Err(GraphTraversalError::DatabaseError(e.to_string()));
+                    }
+                    Err(_) => {
+                        tracing::error!("Timeout in path finding");
+                        return Err(GraphTraversalError::Timeout);
+                    }
+                };
+                
+                connected_nodes.append(&mut node_ids);
+            }
             
             // Add connected nodes to stack (avoid cycles by checking if node is already in path)
             for next_id in connected_nodes {
@@ -405,6 +442,7 @@ impl GraphTraversalService {
                     total_count: nodes.len(),
                     nodes,
                     paths: Some(vec![path]),
+                    node_depths: None,
                 });
             }
         }
@@ -450,11 +488,7 @@ impl GraphTraversalService {
         }));
         
         let direction = query.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
-        let relation_list = if let Some(types) = &query.relation_types {
-            types.join(", ")
-        } else {
-            "depends_on, defined_in, calls, justified_by, modifies, implements, produced".to_string()
-        };
+        let relation_list = self.relation_list(query);
         
         while let Some(Reverse(current)) = heap.pop() {
             if current.node_id == target_id {
@@ -467,62 +501,71 @@ impl GraphTraversalService {
             
             visited.insert(current.node_id);
             
-            // Build query for current node's neighbors
-            let query_str = match direction {
-                GraphDirection::Outbound => {
-                    format!("SELECT ->{}->objects AS connected FROM objects:`{}`", relation_list, current.node_id)
-                }
-                GraphDirection::Inbound => {
-                    format!("SELECT <-{}<-objects AS connected FROM objects:`{}`", relation_list, current.node_id)
-                }
-                GraphDirection::Both => {
-                    format!("SELECT ->{}->objects AS outbound, <-{}<-objects AS inbound FROM objects:`{}`", 
-                        relation_list, relation_list, current.node_id)
-                }
-            };
-            
-            let query_result = timeout(
-                Duration::from_secs(5),
-                self.db.client.query(query_str)
-            ).await;
-            
-            let connected_nodes: Vec<Uuid> = match query_result {
-                Ok(Ok(mut response)) => {
-                    let raw_results: Vec<Value> = take_json_values(&mut response, 0);
-                    
-                    raw_results
-                        .into_iter()
-                        .filter_map(|v| {
-                            if let Some(obj) = v.as_object() {
-                                let mut node_ids = Vec::new();
-                                
-                                if direction == &GraphDirection::Both {
-                                    // Handle both directions
-                                    if let Some(outbound) = obj.get("outbound") {
-                                        if let Some(arr) = outbound.as_array() {
-                                            for node in arr {
-                                                if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
-                                                    if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                        node_ids.push(node_id);
+            let projection = "{ id: string::concat(id) }";
+
+            let mut connected_nodes: Vec<Uuid> = Vec::new();
+            for relation in &relation_list {
+                let relation_clause = self.format_relation_clause(relation);
+                let query_str = match direction {
+                    GraphDirection::Outbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: ->{}->objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current.node_id
+                        )
+                    }
+                    GraphDirection::Inbound => {
+                        format!(
+                            "SELECT VALUE {{ connected: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, current.node_id
+                        )
+                    }
+                    GraphDirection::Both => {
+                        format!(
+                            "SELECT VALUE {{ outbound: ->{}->objects.{}, inbound: <-{}<-objects.{} }} FROM objects:`{}`",
+                            relation_clause, projection, relation_clause, projection, current.node_id
+                        )
+                    }
+                };
+                
+                let query_result = timeout(
+                    Duration::from_secs(5),
+                    self.db.client.query(query_str)
+                ).await;
+                
+                let mut node_ids: Vec<Uuid> = match query_result {
+                    Ok(Ok(mut response)) => {
+                        let raw_results: Vec<Value> = take_json_values(&mut response, 0);
+                        
+                        raw_results
+                            .into_iter()
+                            .filter_map(|v| {
+                                if let Some(obj) = v.as_object() {
+                                    let mut ids = Vec::new();
+                                    
+                                    if direction == &GraphDirection::Both {
+                                        if let Some(outbound) = obj.get("outbound") {
+                                            if let Some(arr) = outbound.as_array() {
+                                                for node in arr {
+                                                    if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
+                                                        if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
+                                                            ids.push(node_id);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                    if let Some(inbound) = obj.get("inbound") {
-                                        if let Some(arr) = inbound.as_array() {
-                                            for node in arr {
-                                                if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
-                                                    if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                        node_ids.push(node_id);
+                                        if let Some(inbound) = obj.get("inbound") {
+                                            if let Some(arr) = inbound.as_array() {
+                                                for node in arr {
+                                                    if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
+                                                        if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
+                                                            ids.push(node_id);
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                    }
-                                } else {
-                                    // Handle single direction
-                                    if let Some(connected) = obj.get("connected") {
+                                    } else if let Some(connected) = obj.get("connected") {
                                         let nodes = if let Some(arr) = connected.as_array() {
                                             arr.clone()
                                         } else {
@@ -532,30 +575,32 @@ impl GraphTraversalService {
                                         for node in nodes {
                                             if let Some(id_str) = node.get("id").and_then(|v| v.as_str()) {
                                                 if let Ok(node_id) = Uuid::parse_str(id_str.trim_start_matches("objects:")) {
-                                                    node_ids.push(node_id);
+                                                    ids.push(node_id);
                                                 }
                                             }
                                         }
                                     }
+                                    
+                                    Some(ids)
+                                } else {
+                                    None
                                 }
-                                
-                                Some(node_ids)
-                            } else {
-                                None
-                            }
-                        })
-                        .flatten()
-                        .collect()
-                }
-                Ok(Err(e)) => {
-                    tracing::error!("Database error in shortest path: {}", e);
-                    return Err(GraphTraversalError::DatabaseError(e.to_string()));
-                }
-                Err(_) => {
-                    tracing::error!("Timeout in shortest path");
-                    return Err(GraphTraversalError::Timeout);
-                }
-            };
+                            })
+                            .flatten()
+                            .collect()
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!("Database error in shortest path: {}", e);
+                        return Err(GraphTraversalError::DatabaseError(e.to_string()));
+                    }
+                    Err(_) => {
+                        tracing::error!("Timeout in shortest path");
+                        return Err(GraphTraversalError::Timeout);
+                    }
+                };
+                
+                connected_nodes.append(&mut node_ids);
+            }
             
             // Add neighbors to heap
             for next_id in connected_nodes {

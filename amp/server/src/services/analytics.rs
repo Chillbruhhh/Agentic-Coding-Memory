@@ -142,20 +142,24 @@ impl AnalyticsService {
     async fn get_objects_by_type(&self) -> Result<HashMap<String, i64>> {
         let mut map = HashMap::new();
 
+        // Use string::concat to force string conversion and avoid enum serialization issues
         let symbol_kind_query =
-            "SELECT VALUE string::lowercase(kind) FROM objects WHERE string::lowercase(type) = 'symbol' AND kind IS NOT NULL";
+            "SELECT string::lowercase(string::concat('', kind)) AS kind, count() AS count FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' AND kind IS NOT NULL GROUP BY kind";
         let mut result = self.db.client.query(symbol_kind_query).await?;
         let kinds: Vec<serde_json::Value> = take_json_values(&mut result, 0);
         tracing::info!("Symbol kind query returned {} rows", kinds.len());
 
         for kind_value in kinds {
-            if let Some(kind) = kind_value.as_str() {
-                *map.entry(kind.to_string()).or_insert(0) += 1;
+            if let (Some(kind), Some(count)) = (
+                kind_value.get("kind").and_then(|v| v.as_str()),
+                kind_value.get("count").and_then(|v| v.as_i64())
+            ) {
+                *map.entry(kind.to_string()).or_insert(0) += count;
             }
         }
 
         let other_type_query =
-            "SELECT VALUE string::lowercase(type) FROM objects WHERE string::lowercase(type) != 'symbol'";
+            "SELECT string::lowercase(string::concat('', type)) AS obj_type, count() AS count FROM objects WHERE string::lowercase(string::concat('', type)) != 'symbol' GROUP BY obj_type";
         let mut result = self.db.client.query(other_type_query).await?;
         let types: Vec<serde_json::Value> = take_json_values(&mut result, 0);
 
@@ -165,8 +169,11 @@ impl AnalyticsService {
         );
 
         for type_value in types {
-            if let Some(obj_type) = type_value.as_str() {
-                *map.entry(obj_type.to_string()).or_insert(0) += 1;
+            if let (Some(obj_type), Some(count)) = (
+                type_value.get("obj_type").and_then(|v| v.as_str()),
+                type_value.get("count").and_then(|v| v.as_i64())
+            ) {
+                *map.entry(obj_type.to_string()).or_insert(0) += count;
             }
         }
 
@@ -174,10 +181,10 @@ impl AnalyticsService {
     }
 
     async fn get_language_distribution(&self) -> Result<HashMap<String, i64>> {
-        let query = "SELECT language, count() AS count FROM objects WHERE string::lowercase(type) = 'symbol' AND language IS NOT NULL GROUP BY language";
+        let query = "SELECT language, count() AS count FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' AND language IS NOT NULL GROUP BY language";
         let mut result = self.db.client.query(query).await?;
         let counts: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        
+
         let mut map = HashMap::new();
         for count in counts {
             if let (Some(language), Some(count_val)) = (
@@ -191,16 +198,16 @@ impl AnalyticsService {
     }
 
     async fn get_recent_activity(&self) -> Result<Vec<ActivityItem>> {
-        let query = "SELECT id, type, created_at, updated_at FROM objects ORDER BY created_at DESC LIMIT 10";
+        let query = "SELECT string::concat('', id) AS id, string::concat('', type) AS type, string::concat('', created_at) AS created_at, string::concat('', updated_at) AS updated_at FROM objects ORDER BY created_at DESC LIMIT 10";
         let mut result = self.db.client.query(query).await?;
         let objects: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        
+
         let mut activities = Vec::new();
         for (i, obj) in objects.iter().enumerate() {
             let _id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
             let obj_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
             let created_at = obj.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            
+
             activities.push(ActivityItem {
                 id: format!("activity_{}", i),
                 activity_type: obj_type.clone(),
@@ -250,7 +257,7 @@ impl AnalyticsService {
     async fn get_indexing_stats(&self) -> Result<IndexingStats> {
         // Get symbol count as files indexed
         let files_query =
-            "SELECT count() AS total FROM objects WHERE string::lowercase(type) = 'symbol' AND string::lowercase(kind) = 'file'";
+            "SELECT count() AS total FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' AND string::lowercase(string::concat('', kind)) = 'file'";
         let mut result = self.db.client.query(files_query).await?;
         let files_counts: Vec<serde_json::Value> = take_json_values(&mut result, 0);
         let files_indexed = files_counts.first()
@@ -259,7 +266,7 @@ impl AnalyticsService {
             .unwrap_or(0);
 
         // Get total symbols as symbols extracted
-        let symbols_query = "SELECT count() AS total FROM objects WHERE string::lowercase(type) = 'symbol'";
+        let symbols_query = "SELECT count() AS total FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol'";
         let mut result = self.db.client.query(symbols_query).await?;
         let symbols_counts: Vec<serde_json::Value> = take_json_values(&mut result, 0);
         let symbols_extracted = symbols_counts.first()
@@ -269,7 +276,7 @@ impl AnalyticsService {
 
         // Get most recent symbol creation time
         let time_query =
-            "SELECT created_at FROM objects WHERE string::lowercase(type) = 'symbol' ORDER BY created_at DESC LIMIT 1";
+            "SELECT string::concat('', created_at) AS created_at FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' ORDER BY created_at DESC LIMIT 1";
         let mut result = self.db.client.query(time_query).await?;
         let last_times: Vec<serde_json::Value> = take_json_values(&mut result, 0);
         let last_index_time = last_times.first()
@@ -336,22 +343,22 @@ impl AnalyticsService {
 
     async fn get_system_events(&self) -> Result<Vec<SystemEvent>> {
         // Get recent activity from objects table
-        let query = "SELECT id, type, created_at, updated_at FROM objects ORDER BY created_at DESC LIMIT 20";
+        let query = "SELECT string::concat('', id) AS id, string::concat('', type) AS type, string::concat('', created_at) AS created_at, string::concat('', updated_at) AS updated_at FROM objects ORDER BY created_at DESC LIMIT 20";
         let mut result = self.db.client.query(query).await?;
         let objects: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        
+
         let mut events = Vec::new();
         for obj in objects {
             let obj_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
             let created_at = obj.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
-            
+
             // Parse timestamp and format as HH:MM:SS
             let time = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(created_at) {
                 dt.format("%H:%M:%S").to_string()
             } else {
                 "00:00:00".to_string()
             };
-            
+
             events.push(SystemEvent {
                 time,
                 event: format!("{} object indexed", obj_type.to_uppercase()),
@@ -360,7 +367,7 @@ impl AnalyticsService {
                 alert: false,
             });
         }
-        
+
         // Add system startup event if no events
         if events.is_empty() {
             events.push(SystemEvent {
@@ -371,7 +378,7 @@ impl AnalyticsService {
                 alert: false,
             });
         }
-        
+
         Ok(events)
     }
 }

@@ -31,6 +31,20 @@ impl AmpClient {
         }
     }
 
+    pub async fn batch_create_objects(&self, objects: Vec<Value>) -> Result<Value> {
+        let response = self.client
+            .post(&format!("{}/v1/objects/batch", self.base_url))
+            .json(&objects)
+            .send()
+            .await?;
+        
+        if response.status().is_success() || response.status().as_u16() == 207 {
+            Ok(response.json().await?)
+        } else {
+            anyhow::bail!("Failed to batch create objects: {}", response.status())
+        }
+    }
+
     pub async fn query(&self, query: &str) -> Result<Value> {
         let request_body = serde_json::json!({
             "query": query,
@@ -75,6 +89,35 @@ impl AmpClient {
             Ok(response.json().await?)
         } else {
             anyhow::bail!("Failed to parse file: {}", response.status())
+        }
+    }
+
+    pub async fn generate_ai_file_log(&self, payload: serde_json::Value) -> Result<Value> {
+        let response = self.client
+            .post(&format!("{}/v1/codebase/ai-file-log", self.base_url))
+            .json(&payload)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(response.json().await?)
+        } else {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!("Failed to generate AI file log ({}): {}", status, error_text)
+        }
+    }
+
+    pub async fn get_settings(&self) -> Result<Value> {
+        let response = self.client
+            .get(&format!("{}/v1/settings", self.base_url))
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(response.json().await?)
+        } else {
+            anyhow::bail!("Failed to load settings: {}", response.status())
         }
     }
 

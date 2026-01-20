@@ -25,6 +25,7 @@ use services::embedding::EmbeddingService;
 use services::graph::GraphTraversalService;
 use services::hybrid::HybridRetrievalService;
 use services::analytics::AnalyticsService;
+use services::settings::SettingsService;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -34,6 +35,7 @@ pub struct AppState {
     pub graph_service: Arc<GraphTraversalService>,
     pub hybrid_service: Arc<HybridRetrievalService>,
     pub analytics_service: Arc<AnalyticsService>,
+    pub settings_service: Arc<SettingsService>,
 }
 
 #[tokio::main]
@@ -85,19 +87,34 @@ async fn main() -> anyhow::Result<()> {
     // Initialize database schema
     db.initialize_schema().await?;
 
+    let settings_service = Arc::new(SettingsService::new(db.client.clone()));
+    tracing::info!("Settings service initialized");
+
+    let settings = settings_service
+        .load_settings()
+        .await
+        .unwrap_or_default();
+
+    let (embedding_model, embedding_dimension) = match settings.embedding_provider.as_str() {
+        "openrouter" => (settings.openrouter_model.clone(), settings.openrouter_dimension as usize),
+        "ollama" => (settings.ollama_model.clone(), settings.ollama_dimension as usize),
+        _ => (settings.openai_model.clone(), settings.openai_dimension as usize),
+    };
+
     // Initialize embedding service
     let embedding_service = services::embedding::create_embedding_service(
-        &config.embedding_provider,
-        config.openai_api_key.clone(),
-        config.ollama_url.clone(),
-        config.embedding_dimension,
-        config.embedding_model.clone(),
+        &settings.embedding_provider,
+        Some(settings.openai_api_key.clone()),
+        Some(settings.openrouter_api_key.clone()),
+        settings.ollama_url.clone(),
+        embedding_dimension,
+        embedding_model.clone(),
     );
     
     tracing::info!(
         "Embedding service initialized: provider={}, model={}, dimension={}, enabled={}",
-        config.embedding_provider,
-        config.embedding_model,
+        settings.embedding_provider,
+        embedding_model,
         embedding_service.dimension(),
         embedding_service.is_enabled()
     );
@@ -123,6 +140,7 @@ async fn main() -> anyhow::Result<()> {
         graph_service,
         hybrid_service: Arc::new(hybrid_service),
         analytics_service,
+        settings_service,
     };
 
     // Build router
@@ -162,9 +180,15 @@ fn api_routes() -> Router<AppState> {
         .route("/codebase/parse-file", post(handlers::codebase::parse_file))
         .route("/codebase/file-logs", get(handlers::codebase::get_file_logs))
         .route("/codebase/file-logs/:path", get(handlers::codebase::get_file_log))
+        .route("/codebase/file-log-objects/:path", get(handlers::codebase::get_file_log_object))
+        .route("/codebase/file-contents/:path", get(handlers::codebase::get_file_content))
         .route("/codebase/update-file-log", post(handlers::codebase::update_file_log))
+        .route("/codebase/ai-file-log", post(handlers::codebase::generate_ai_file_log))
         // Analytics endpoint
         .route("/analytics", get(handlers::analytics::get_analytics))
+        // Settings endpoints
+        .route("/settings", get(handlers::settings::get_settings))
+        .route("/settings", put(handlers::settings::update_settings))
 }
 
 async fn track_latency(

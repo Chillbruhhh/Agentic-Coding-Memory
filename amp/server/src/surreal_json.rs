@@ -33,7 +33,13 @@ pub fn normalize_object_id(value: &mut JsonValue) {
     // If we have id_string, use that as the main id
     if let Some(id_string) = map.remove("id_string") {
         if let Some(id_str) = id_string.as_str() {
-            map.insert("id".to_string(), JsonValue::String(id_str.to_string()));
+            // Normalize: extract UUID from "objects:⟨uuid⟩" format if present
+            let normalized = if let Some((_, raw_id)) = id_str.split_once(':') {
+                raw_id.trim_matches('`').trim_matches('⟨').trim_matches('⟩').to_string()
+            } else {
+                id_str.trim_matches('`').trim_matches('⟨').trim_matches('⟩').to_string()
+            };
+            map.insert("id".to_string(), JsonValue::String(normalized));
         }
         return;
     }
@@ -45,7 +51,11 @@ pub fn normalize_object_id(value: &mut JsonValue) {
 
     if let Some(id_str) = id_value.as_str() {
         if let Some((_, raw_id)) = id_str.split_once(':') {
-            let normalized = raw_id.trim_matches('`');
+            // Trim both backticks AND unicode angle brackets (⟨⟩) that SurrealDB adds
+            let normalized = raw_id
+                .trim_matches('`')
+                .trim_matches('⟨')
+                .trim_matches('⟩');
             map.insert("id".to_string(), JsonValue::String(normalized.to_string()));
         }
         return;
@@ -53,7 +63,11 @@ pub fn normalize_object_id(value: &mut JsonValue) {
 
     if let Some(id_obj) = id_value.as_object() {
         if let Some(raw_id) = id_obj.get("id").and_then(|inner| inner.as_str()) {
-            let normalized = raw_id.trim_matches('`');
+            // Trim both backticks AND unicode angle brackets (⟨⟩) that SurrealDB adds
+            let normalized = raw_id
+                .trim_matches('`')
+                .trim_matches('⟨')
+                .trim_matches('⟩');
             map.insert("id".to_string(), JsonValue::String(normalized.to_string()));
         }
     }

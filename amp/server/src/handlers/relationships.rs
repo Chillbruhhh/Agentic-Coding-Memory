@@ -40,17 +40,10 @@ pub async fn create_relationship(
     // Skip verification - SurrealDB enum serialization issues prevent proper verification
     tracing::info!("Creating relationship: {} -> {} -> {}", request.source_id, table_name, request.target_id);
     
-    // Use RELATE statement for graph edges
-    let metadata_json = if let Some(meta) = &request.metadata {
-        serde_json::to_string(meta).unwrap_or_else(|_| "{}".to_string())
-    } else {
-        "{}".to_string()
-    };
-    
-    // Correct RELATE syntax with proper record ID format
+    // Use RELATE statement for graph edges - use hyphenated UUID format
     let query = format!(
-        "RELATE objects:`{}`->{}->objects:`{}` SET metadata = {}, created_at = time::now()",
-        request.source_id, table_name, request.target_id, metadata_json
+        "RELATE objects:`{}`->{}->objects:`{}` SET created_at = time::now()",
+        request.source_id, table_name, request.target_id
     );
     
     tracing::debug!("Creating relationship: {}", query);
@@ -61,20 +54,9 @@ pub async fn create_relationship(
     ).await;
     
     match result {
-        Ok(Ok(mut response)) => {
-            let created: Vec<Value> = take_json_values(&mut response, 0);
-            tracing::info!("Created relationship: {} -> {} ({}), records: {:?}", 
-                request.source_id, request.target_id, table_name, created);
-            
-            // Verify it exists immediately
-            let verify_query = format!("SELECT * FROM {}", table_name);
-            if let Ok(Ok(mut verify_response)) = timeout(
-                Duration::from_secs(1),
-                state.db.client.query(verify_query)
-            ).await {
-                let all_edges: Vec<Value> = take_json_values(&mut verify_response, 0);
-                tracing::info!("Verification: {} table has {} total edges", table_name, all_edges.len());
-            }
+        Ok(Ok(_response)) => {
+            tracing::info!("Created relationship: {} -> {} ({})", 
+                request.source_id, request.target_id, table_name);
             
             Ok((
                 StatusCode::CREATED,

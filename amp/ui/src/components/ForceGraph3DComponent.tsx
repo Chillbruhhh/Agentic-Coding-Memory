@@ -1,112 +1,103 @@
-import React, { useRef, useEffect } from 'react';
-import ForceGraph3D from '3d-force-graph';
-import * as THREE from 'three';
+import React, { useRef, useEffect, useCallback, useState } from 'react';
+import ForceGraph3D from 'react-force-graph-3d';
 import { GraphData, GraphNode, GraphLink } from '../utils/graphDataAdapter';
 import { graphTheme } from '../utils/graphTheme';
-
-console.log('Three.js version:', THREE.REVISION);
 
 interface ForceGraph3DComponentProps {
   data: GraphData;
   onNodeClick?: (node: GraphNode) => void;
   onNodeHover?: (node: GraphNode | null) => void;
   onLinkHover?: (link: GraphLink | null) => void;
+  layoutKey?: number;
 }
 
 export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
   data,
   onNodeClick,
   onNodeHover,
-  onLinkHover
+  onLinkHover,
+  layoutKey
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const graphRef = useRef<any>(null);
+  const fgRef = useRef<any>(null);
   const didInitialZoomRef = useRef(false);
+  const [mounted, setMounted] = useState(false);
+  const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
 
+  // Mark as mounted after first render
   useEffect(() => {
-    if (!containerRef.current) {
-      console.log('No container ref');
-      return;
-    }
-    
-    return () => {
-      if (graphRef.current) {
-        graphRef.current._destructor();
-        graphRef.current = null;
-      }
-    };
+    const timer = setTimeout(() => setMounted(true), 100);
+    return () => clearTimeout(timer);
   }, []);
 
+  // Update graph data only after mounted
   useEffect(() => {
-    if (!containerRef.current) {
-      return;
-    }
+    if (!mounted) return;
 
-    if (!graphRef.current) {
-      const width = containerRef.current.clientWidth;
-      const height = containerRef.current.clientHeight;
-
-      graphRef.current = new ForceGraph3D(containerRef.current)
-        .width(width)
-        .height(height)
-        .backgroundColor(graphTheme.backgroundColor)
-        .nodeAutoColorBy('kind')
-        .nodeVal((node: any) => node.val || 5)
-        .linkColor(() => 'rgba(255,255,255,0.2)');
-
-      const controls = graphRef.current.controls();
-      if (controls) {
-        controls.enableDamping = false;
-        controls.rotateSpeed = 1.1;
-        controls.zoomSpeed = 1.2;
-        controls.panSpeed = 0.9;
-        controls.minDistance = 5;
-        controls.maxDistance = 5000;
-        controls.enablePan = true;
-      }
-
-      const chargeForce = graphRef.current.d3Force('charge');
-      if (chargeForce?.strength) {
-        chargeForce.strength(-120);
-      }
-
-      const linkForce = graphRef.current.d3Force('link');
-      if (linkForce?.distance) {
-        linkForce.distance(40);
-      }
-
-      // Let the layout drift instead of constantly re-centering on (0,0,0).
-      graphRef.current.d3Force('center', null);
-    }
-
-    graphRef.current
-      .onNodeClick((node: any) => onNodeClick?.(node))
-      .onNodeHover((node: any) => onNodeHover?.(node))
-      .onLinkHover((link: any) => onLinkHover?.(link));
-  }, [onNodeClick, onNodeHover, onLinkHover]);
-
-  useEffect(() => {
-    if (!graphRef.current) {
-      return;
-    }
-
-    // Ensure data has valid arrays with defaults
     const safeData = {
       nodes: data?.nodes || [],
       links: data?.links || []
     };
 
-    if (safeData.nodes.length === 0) {
-      console.log('No nodes to render');
-      return;
-    }
+    // Delay data update to ensure layout is initialized
+    const timer = setTimeout(() => {
+      setGraphData(safeData);
+    }, 50);
 
-    graphRef.current.graphData(safeData);
+    return () => clearTimeout(timer);
+  }, [data, mounted]);
 
-    if (!didInitialZoomRef.current) {
+  // Zoom to fit on initial load
+  useEffect(() => {
+    if (fgRef.current && graphData?.nodes?.length && !didInitialZoomRef.current) {
       didInitialZoomRef.current = true;
+      setTimeout(() => {
+        fgRef.current?.zoomToFit?.(400);
+      }, 500);
     }
-  }, [data]);
+  }, [graphData]);
 
-  return <div ref={containerRef} className="w-full h-full" />;
+  // Reheat simulation when layout key changes
+  useEffect(() => {
+    if (fgRef.current && graphData?.nodes?.length && layoutKey !== undefined) {
+      fgRef.current?.d3ReheatSimulation?.();
+    }
+  }, [layoutKey]);
+
+  const handleNodeClick = useCallback((node: any) => {
+    onNodeClick?.(node);
+  }, [onNodeClick]);
+
+  const handleNodeHover = useCallback((node: any) => {
+    onNodeHover?.(node);
+  }, [onNodeHover]);
+
+  const handleLinkHover = useCallback((link: any) => {
+    onLinkHover?.(link);
+  }, [onLinkHover]);
+
+  if (!mounted) {
+    return <div className="w-full h-full flex items-center justify-center text-slate-500">Initializing graph...</div>;
+  }
+
+  if (graphData.nodes.length === 0 && data?.nodes?.length === 0) {
+    return <div className="w-full h-full flex items-center justify-center text-slate-500">No nodes to display</div>;
+  }
+
+  return (
+    <ForceGraph3D
+      ref={fgRef}
+      graphData={graphData}
+      backgroundColor={graphTheme.backgroundColor}
+      nodeAutoColorBy="kind"
+      nodeVal={(node: any) => node.val || 5}
+      linkColor={() => 'rgba(255,255,255,0.2)'}
+      onNodeClick={handleNodeClick}
+      onNodeHover={handleNodeHover}
+      onLinkHover={handleLinkHover}
+      cooldownTicks={200}
+      warmupTicks={100}
+      d3AlphaDecay={0.02}
+      d3VelocityDecay={0.3}
+    />
+  );
 };

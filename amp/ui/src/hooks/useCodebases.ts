@@ -43,14 +43,16 @@ export const useCodebases = () => {
     const normalizePath = (path: string) => {
       return path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '');
     };
+    const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
 
     // Separate objects by kind
-    const projectObjs = objects.filter(obj => obj.kind === 'project');
-    const dirObjs = objects.filter(obj => obj.kind === 'directory');
-    const fileObjs = objects.filter(obj => obj.kind === 'file');
-    const codeSymbols = objects.filter(obj => 
-      obj.kind && !['project', 'directory', 'file'].includes(obj.kind)
-    );
+    const projectObjs = objects.filter(obj => normalizeKind(obj.kind) === 'project');
+    const dirObjs = objects.filter(obj => normalizeKind(obj.kind) === 'directory');
+    const fileObjs = objects.filter(obj => normalizeKind(obj.kind) === 'file');
+    const codeSymbols = objects.filter(obj => {
+      const kind = normalizeKind(obj.kind);
+      return kind && !['project', 'directory', 'file'].includes(kind);
+    });
 
     console.log('Building file tree:', {
       directories: dirObjs.length,
@@ -93,7 +95,7 @@ export const useCodebases = () => {
         if (fileNode && fileNode.type === 'file') {
           fileNode.symbols?.push({
             name: symbol.name,
-            type: symbol.kind,
+            type: normalizeKind(symbol.kind),
             signature: symbol.signature
           });
         } else {
@@ -208,55 +210,157 @@ export const useCodebases = () => {
         projectGroups[obj.project_id].push(obj);
       });
 
+      const inferLanguage = (path: string | undefined) => {
+        if (!path) return undefined;
+        const parts = path.split('.');
+        const ext = parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+        switch (ext) {
+          case 'py':
+          case 'pyi':
+            return 'python';
+          case 'ts':
+          case 'tsx':
+            return 'typescript';
+          case 'js':
+          case 'jsx':
+            return 'javascript';
+          case 'rs':
+            return 'rust';
+          case 'go':
+            return 'go';
+          case 'java':
+            return 'java';
+          case 'kt':
+          case 'kts':
+            return 'kotlin';
+          case 'cs':
+            return 'csharp';
+          case 'c':
+            return 'c';
+          case 'h':
+          case 'hpp':
+          case 'hh':
+          case 'hxx':
+          case 'cpp':
+          case 'cxx':
+          case 'cc':
+            return 'cpp';
+          case 'swift':
+            return 'swift';
+          case 'rb':
+            return 'ruby';
+          case 'php':
+            return 'php';
+          case 'sh':
+          case 'bash':
+            return 'shell';
+          case 'md':
+            return 'markdown';
+          case 'json':
+            return 'json';
+          case 'toml':
+            return 'toml';
+          case 'yml':
+          case 'yaml':
+            return 'yaml';
+          default:
+            return undefined;
+        }
+      };
+
       // Convert to codebase format
       const realCodebases: CodebaseProject[] = Object.entries(projectGroups).map(([projectId, projectObjects]) => {
         console.log(`Processing project: ${projectId}`, projectObjects.slice(0, 3)); // Debug first 3 objects
         
-        // Calculate language stats
-        const languageStats: Record<string, number> = {};
-        const languageCounts: Record<string, number> = {};
-        
-        projectObjects.forEach(obj => {
-          // Handle different possible language field names
-          const language = obj.language || obj.lang || obj.file_type;
-          if (language) {
-            languageCounts[language] = (languageCounts[language] || 0) + 1;
-          }
-        });
+        // Calculate language stats (code file distribution by size)
+      const languageStats: Record<string, number> = {};
+      const languageCounts: Record<string, number> = {};
+      const projectFileObjects = projectObjects.filter(obj => (obj.kind || '').toLowerCase() === 'file');
+      const totalFiles = projectFileObjects.length || 0;
+      const codeLanguages = new Set([
+        'python', 'typescript', 'javascript', 'rust', 'go', 'java', 'kotlin',
+        'csharp', 'c', 'cpp', 'swift', 'ruby', 'php', 'shell'
+      ]);
 
-        const totalFiles = Object.values(languageCounts).reduce((a, b) => a + b, 0) || 1;
-        Object.entries(languageCounts).forEach(([lang, count]) => {
-          languageStats[lang] = Math.round((count / totalFiles) * 100);
+      const addLanguageWeight = (language: string | undefined, weight: number) => {
+        if (!language) return;
+        const key = language.toLowerCase();
+        if (!codeLanguages.has(key)) return;
+        languageCounts[key] = (languageCounts[key] || 0) + Math.max(weight, 1);
+      };
+
+      projectFileObjects.forEach((file) => {
+        const rawPath = file.path || file.file_path;
+        let language = file.language || file.lang || file.file_type;
+        if (!language || language.toLowerCase() === 'unknown') {
+          language = inferLanguage(rawPath);
+        }
+        const weight = typeof file.file_size === 'number'
+          ? file.file_size
+          : typeof file.line_count === 'number'
+            ? file.line_count
+            : 1;
+        addLanguageWeight(language, weight);
+      });
+
+      const totalLanguageUnits = Object.values(languageCounts).reduce((sum, value) => sum + value, 0);
+      Object.entries(languageCounts).forEach(([lang, count]) => {
+        languageStats[lang] = totalLanguageUnits > 0 ? Math.round((count / totalLanguageUnits) * 100) : 0;
+      });
+
+      if (totalLanguageUnits === 0) {
+        const fallbackCounts: Record<string, number> = {};
+        projectFileObjects.forEach((file) => {
+          let language = file.language || file.lang || file.file_type;
+          if (!language || language.toLowerCase() === 'unknown') {
+            language = inferLanguage(file.path || file.file_path);
+          }
+          if (!language) return;
+          const key = language.toLowerCase();
+          if (!codeLanguages.has(key)) return;
+          fallbackCounts[key] = (fallbackCounts[key] || 0) + 1;
         });
+        const fallbackTotal = Object.values(fallbackCounts).reduce((sum, value) => sum + value, 0);
+        Object.entries(fallbackCounts).forEach(([lang, count]) => {
+          languageStats[lang] = fallbackTotal > 0 ? Math.round((count / fallbackTotal) * 100) : 0;
+        });
+      }
 
         // Build file tree from objects
         const fileTree = buildFileTreeFromObjects(projectObjects);
 
         // Count symbols - only count actual code symbols (function, class, method, variable)
-        const codeSymbolKinds = ['function', 'class', 'method', 'variable', 'interface'];
+        const codeSymbolKinds = ['function', 'class', 'method', 'variable', 'interface', 'type'];
         const totalSymbols = projectObjects.filter(obj => {
+          const objType = (obj.type || '').toLowerCase();
+          const objKind = (obj.kind || '').toLowerCase();
           console.log('Object type check:', obj.type, obj.kind, obj.name); // Debug log
-          return obj.type === 'Symbol' && codeSymbolKinds.includes(obj.kind);
+          return objType === 'symbol' && codeSymbolKinds.includes(objKind);
         }).length;
         
         console.log(`Total symbols found: ${totalSymbols} out of ${projectObjects.length} objects`); // Debug log
 
         // Get project name - look for the project Symbol object first
-        const projectSymbol = projectObjects.find(obj => obj.kind === 'project');
+        const projectSymbol = projectObjects.find(obj => (obj.kind || '').toLowerCase() === 'project');
         const projectName = projectSymbol?.name || 
           (projectId && projectId !== 'undefined' 
             ? projectId.charAt(0).toUpperCase() + projectId.slice(1).replace(/[-_]/g, ' ')
             : `Python Project (${projectObjects.length} objects)`);
 
+        const createdDates = projectObjects
+          .map(obj => obj.created_at)
+          .filter((value: string | undefined) => value);
+        const lastIndexed = projectSymbol?.created_at || createdDates.sort().at(-1) || new Date().toISOString();
+
         return {
           id: projectId || `project-${Date.now()}`,
           name: projectName,
           path: `/${projectId || 'unknown'}`,
-          description: `Parsed codebase with ${totalSymbols} symbols across ${Math.max(totalFiles, projectObjects.length)} files`,
-          language_stats: Object.keys(languageStats).length > 0 ? languageStats : { 'Python': 100 },
-          total_files: Math.max(totalFiles, projectObjects.length),
+          description: `Parsed codebase with ${totalSymbols} symbols across ${Math.max(totalFiles, 0)} files`,
+          language_stats: Object.keys(languageStats).length > 0 ? languageStats : {},
+          total_files: totalFiles,
           total_symbols: totalSymbols,
-          last_indexed: projectObjects[0]?.created_at || new Date().toISOString(),
+          last_indexed: lastIndexed,
           file_tree: fileTree
         };
       });

@@ -3229,3 +3229,338 @@ The MCP server integration represents a major milestone for AMP, transforming it
 **Lines of Code Added**: 2,483 lines across 25 files  
 **Status**: ✅ Production Ready  
 **Next Steps**: Enterprise deployment and ecosystem expansion
+## Day 7 - January 19, 2026 - HYBRID QUERY ENHANCEMENTS
+
+### Morning Session - Hybrid Vector Query Filter Fix (30 minutes)
+**Objective**: Fix vector search failures caused by NONE-typed embeddings in database
+
+**The Problem**:
+- Vector similarity queries failing when objects had null/NONE embeddings
+- SurrealDB cosine similarity function erroring on invalid embedding types
+- Hybrid queries returning incomplete results due to vector search failures
+
+**Solution Implemented**:
+- **Vector Query Filtering**: Added `WHERE embedding IS NOT NONE` clause to all vector searches
+- **Hybrid Path Fix**: Applied filter to both hybrid and non-hybrid query builders
+- **Graceful Degradation**: Vector search now skips invalid embeddings while returning valid matches
+
+**Technical Details**:
+```rust
+// Before: Failed on NONE embeddings
+let query = "SELECT * FROM objects ORDER BY vector::similarity::cosine(embedding, $vector)";
+
+// After: Filters out invalid embeddings
+let query = "SELECT * FROM objects WHERE embedding IS NOT NONE 
+  ORDER BY vector::similarity::cosine(embedding, $vector)";
+```
+
+**Results**:
+- ✅ Vector search no longer crashes on NONE embeddings
+- ✅ Hybrid queries return partial results when embeddings unavailable
+- ✅ Graceful handling of mixed embedding availability
+
+**Time Spent**: 30 minutes  
+**Status**: ✅ Complete
+
+---
+
+## Day 8 - January 20, 2026 - ADVANCED GRAPH FEATURES & AI INDEXING
+
+### Early Morning - Graph Traversal & Hybrid Query Improvements (2 hours)
+**Objective**: Enhance graph traversal with full object support and advanced hybrid query features
+
+**Major Features Implemented**:
+
+**1. Graph Traversal Object Retrieval** (30 minutes):
+- **Problem**: Graph queries only returning node IDs, not full objects
+- **Solution**: Modified graph traversal to request complete object data for connected nodes
+- **Impact**: Hybrid graph results now include full object context for better relevance
+
+**2. Hybrid Vector Search Logging** (15 minutes):
+- Added comprehensive logging for vector search operations
+- Logs include query length, vector dimensions, and result counts
+- Helps debug empty results and query failures
+
+**3. SELECT VALUE Migration** (20 minutes):
+- **Problem**: SurrealDB enum serialization errors with regular SELECT
+- **Solution**: Switched vector queries to `SELECT VALUE` with explicit field projection
+- **Challenge**: Had to rework ORDER BY to use ranked subquery pattern
+- **Technical Implementation**:
+  ```rust
+  // Ranked subquery pattern to avoid ORDER BY errors with SELECT VALUE
+  let query = "SELECT VALUE object FROM (
+    SELECT *, vector::similarity::cosine(embedding, $vector) AS score 
+    FROM objects WHERE embedding IS NOT NONE
+    ORDER BY score DESC LIMIT $limit
+  ) AS ranked";
+  ```
+
+**4. Hybrid Graph Defaults & Scoring** (25 minutes):
+- Added intelligent defaults: `max_depth=1`, relation subset, cap at 50 results
+- Implemented depth-weighted scoring for graph results
+- Deeper connections receive lower relevance scores
+
+**5. Graph Intersection & Autoseed** (30 minutes):
+- **`graph_intersect` Flag**: Restricts hybrid graph results to IDs found in text/vector searches
+- **`graph_autoseed` Flag**: Automatically seeds graph traversal from top text/vector results
+- **Bidirectional Traversal**: Autoseeded graphs traverse both inbound and outbound edges
+- **Use Case**: "Find code related to authentication" → seeds from auth symbols, traverses dependencies
+
+**Technical Implementation**:
+```rust
+// Autoseed: Use top text/vector results as graph starting points
+if request.graph_autoseed.unwrap_or(false) {
+  let seed_ids: Vec<String> = text_results.iter()
+    .chain(vector_results.iter())
+    .take(10)
+    .map(|(obj, _, _)| obj.id.clone())
+    .collect();
+  
+  // Traverse both directions for better intersection
+  graph_results = traverse_bidirectional(seed_ids, relations, depth).await?;
+}
+
+// Intersect: Only keep graph results that match text/vector IDs
+if request.graph_intersect.unwrap_or(false) {
+  let text_vector_ids: HashSet<String> = /* ... */;
+  graph_results.retain(|(obj, _, _)| text_vector_ids.contains(&obj.id));
+}
+```
+
+**6. Reverse Edges & Dependencies** (20 minutes):
+- Indexer now creates reverse `defined_in` edges for bidirectional traversal
+- Added dependency edge creation from parser file logs
+- Dependency path resolution using indexed file paths
+
+**7. MCP Tool Updates** (10 minutes):
+- Updated `amp_query` tool to pass new hybrid flags
+- Added mode enforcement: text/vector/graph modes are exclusive, hybrid is default
+- MCP now validates graph options and errors cleanly on missing start_nodes
+
+**Results**:
+- ✅ Graph traversal returns full objects with context
+- ✅ Hybrid queries can auto-seed from text/vector results
+- ✅ Graph intersection provides focused, relevant results
+- ✅ Bidirectional traversal improves relationship discovery
+- ✅ MCP integration supports all new hybrid features
+
+**Time Spent**: 2 hours  
+**Status**: ✅ Complete
+
+### Mid-Morning - Graph Query Robustness (1 hour)
+**Objective**: Fix SurrealDB graph traversal syntax issues and improve error handling
+
+**Issues Resolved**:
+
+**1. UUID Normalization** (10 minutes):
+- **Problem**: Graph queries failing with 422 errors on UUID format mismatches
+- **Solution**: Accept UUIDs with or without `objects:` prefix, normalize internally
+- **Implementation**: Strip prefix if present, add when needed for SurrealDB queries
+
+**2. Multi-Relation Syntax** (50 minutes):
+- **Problem**: SurrealDB rejecting multi-relation traversal clauses
+- **Attempts**:
+  - Tried parentheses grouping: `(depends_on|calls)` → Parse errors
+  - Tried pipe joins: `depends_on|calls` → Empty results
+  - Tried bracket syntax: `[depends_on, calls]` → 500 errors
+- **Final Solution**: Execute one query per relation type, merge results
+- **Technical Implementation**:
+  ```rust
+  // Execute separate queries for each relation type
+  let mut all_results = Vec::new();
+  for relation in relation_types {
+    let query = format!("SELECT * FROM {}->{}->objects", start_node, relation);
+    let results = db.query(query).await?;
+    all_results.extend(results);
+  }
+  // Deduplicate and merge
+  ```
+
+**3. Graph Service Routing** (10 minutes):
+- Graph queries with multiple relation_types now route through graph service
+- Avoids invalid single-hop traversal syntax
+- Ensures consistent behavior across query types
+
+**Results**:
+- ✅ UUID format flexibility prevents 422 errors
+- ✅ Multi-relation traversal working reliably
+- ✅ Proper routing for complex graph queries
+
+**Time Spent**: 1 hour  
+**Status**: ✅ Complete
+
+### Afternoon - AI-Powered FileLog System (3 hours)
+**Objective**: Implement AI-generated file summaries for enhanced code understanding
+
+**Major Implementation**:
+
+**1. Settings Schema Extension** (20 minutes):
+- Added `index_provider` field: "openai", "openrouter", "ollama", or "none"
+- Added provider-specific model settings:
+  - `index_openai_model`: Default "gpt-4o-mini"
+  - `index_openrouter_model`: Default "openai/gpt-4o-mini"
+  - `index_ollama_model`: Default "llama3.1"
+- Added `openrouter_api_key`, `openrouter_model`, `openrouter_dimension` for embeddings
+- Added `index_workers` for parallel indexing (default: 4)
+
+**2. UI Settings Redesign** (30 minutes):
+- Split model configuration into two tabs:
+  - **Index Model Tab**: AI model for generating file summaries
+  - **Embeddings Tab**: Vector embedding provider (OpenAI/OpenRouter/Ollama)
+- Added OpenRouter support with shared API key field
+- Provider-specific configuration panels with model selection
+
+**3. AI FileLog Generation Service** (45 minutes):
+- Created `services/index_llm.rs` with multi-provider support
+- Implemented OpenAI-compatible API calls (works for OpenAI and OpenRouter)
+- Implemented Ollama local model support
+- **Prompt Engineering**: Structured FILE_LOG v1 format with markdown template
+- **JSON Coercion**: Fallback parsing for variant key names (summaryMarkdown, summary_markdown)
+
+**AI FileLog Prompt Template**:
+```markdown
+# FILE_LOG v1
+path: {path}
+language: {language}
+
+## Purpose
+[Concise file overview - required in notes field]
+
+## Key Symbols
+- symbol_name (type): description
+
+## Dependencies
+- import/export statements
+
+## Notes / Decisions Linked
+[Architectural context and decisions]
+```
+
+**4. API Endpoint** (15 minutes):
+- Added `POST /v1/codebase/ai-file-log` endpoint
+- Accepts file path, content, language
+- Returns structured FileLog JSON with `summary_markdown` field
+
+**5. CLI Integration** (45 minutes):
+- Indexer calls AI file log generation for every file and directory
+- Parallel processing with configurable worker limit
+- Stores unified FileLog content in database
+- Links FileLog objects to file/directory nodes via `defined_in` edges
+- **Optimization**: Directory logs run after traversal in parallel
+
+**6. FileLog Normalization** (20 minutes):
+- FileLog objects now store both `summary` and `summary_markdown` fields
+- Ensures consistent retrieval across parser and AI-generated logs
+- Added `/v1/codebase/file-log-objects/:path` endpoint
+- MCP file log reads route to stored AI logs with fallback to parser logs
+
+**7. File Content Retrieval** (15 minutes):
+- Added `GET /v1/codebase/file-contents/:path` endpoint
+- Assembles file contents from FileChunk objects
+- Added MCP `amp_file_content_get` tool with optional `max_chars` limit
+- Enables agents to read indexed file contents without filesystem access
+
+**8. FileLog Lookup Improvements** (30 minutes):
+- **Path Normalization**: Handles casing differences and slash variations
+- **Basename Matching**: Fallback for escaped/backslash paths
+- **File ID Matching**: Uses FileChunk-derived file_id when path fails
+- **UUID Support**: `amp_filelog_get` accepts FileLog object IDs directly
+- **In-Memory Fallback**: Scans FileLog objects when queries fail (prevents 500s)
+- **Ordering Fix**: Removed ORDER BY after SurrealDB projection-only statement errors
+
+**Technical Challenges**:
+
+**1. JSON Parsing Robustness** (20 minutes):
+- **Problem**: AI models emit slightly different JSON key names
+- **Solution**: Coercion logic tries multiple key variants:
+  - `summary_markdown`, `summaryMarkdown`, `summary`
+  - `key_symbols`, `keySymbols`, `symbols`
+- **Fallback**: Extract JSON from markdown code blocks if needed
+
+**2. Indexing Performance** (15 minutes):
+- **Problem**: Sequential AI calls stalling file scan
+- **Solution**: Directory AI logs run after traversal, in parallel
+- **Configuration**: Honors `indexProvider` setting to skip AI when disabled
+- **Output Cleanup**: Fixed garbled characters in progress messages
+
+**Results**:
+- ✅ AI-powered file summaries with structured markdown
+- ✅ Multi-provider support (OpenAI, OpenRouter, Ollama)
+- ✅ Parallel indexing with configurable workers
+- ✅ Robust FileLog lookup with multiple fallback strategies
+- ✅ MCP tools for file content and log retrieval
+- ✅ UI settings for complete AI configuration
+
+**Time Spent**: 3 hours  
+**Status**: ✅ Complete
+
+### Evening - UI Enhancements (1.5 hours)
+**Objective**: Improve codebase visualization and file log display in UI
+
+**Features Implemented**:
+
+**1. Codebase Language Statistics** (45 minutes):
+- **Problem**: Language percentages skewed by non-code files
+- **Evolution**:
+  - First attempt: Infer from file extensions
+  - Second attempt: Weight by code symbol counts
+  - Third attempt: Weight by FileChunk sizes
+  - **Final Solution**: Weight by file_size field on file nodes
+- **Implementation**: File nodes now store `file_size` and `line_count`
+- **Result**: GitHub-style language distribution ignoring non-code files
+
+**2. Knowledge Graph FileLog Panel** (30 minutes):
+- Added right-side panel for file/directory nodes
+- Moved symbol legend to left side for balance
+- **Markdown Rendering**: Full markdown support with ReactMarkdown
+- **Notes Prominence**: File notes displayed at top for visibility
+- **Conditional Display**: Only shows for file/directory node types
+
+**3. Graph Layout Improvements** (15 minutes):
+- **Reheat on Filter**: Force layout reheats when filters/search change
+- **Problem**: Nodes staying dispersed after filter changes
+- **Solution**: Reset simulation alpha to reconnect nodes
+- **Result**: Smooth transitions when changing visible node types
+
+**Results**:
+- ✅ Accurate language distribution weighted by file size
+- ✅ File log panel with markdown rendering
+- ✅ Dynamic graph layout responding to filter changes
+- ✅ Professional UI matching cyberpunk aesthetic
+
+**Time Spent**: 1.5 hours  
+**Status**: ✅ Complete
+
+---
+
+## Day 8 Summary - January 20, 2026
+
+**Total Development Time**: 8 hours
+
+**Major Achievements**:
+1. ✅ Advanced hybrid query system with autoseed and intersection
+2. ✅ AI-powered FileLog generation with multi-provider support
+3. ✅ Robust graph traversal with multi-relation support
+4. ✅ File content retrieval and enhanced MCP tools
+5. ✅ UI improvements for language stats and file logs
+
+**Technical Breakthroughs**:
+- Hybrid graph autoseed enables intelligent relationship discovery
+- AI FileLog system provides rich code context for agents
+- Multi-provider AI support (OpenAI, OpenRouter, Ollama)
+- Parallel indexing with configurable workers
+- Robust FileLog lookup with multiple fallback strategies
+
+**Files Modified**:
+- `amp/server/src/services/hybrid.rs` - Autoseed and intersection logic
+- `amp/server/src/services/index_llm.rs` - AI FileLog generation
+- `amp/server/src/models/settings.rs` - Extended settings schema
+- `amp/server/src/handlers/codebase.rs` - FileLog and content endpoints
+- `amp/cli/src/commands/index.rs` - AI integration and parallel processing
+- `amp/ui/src/components/Settings.tsx` - Split model configuration
+- `amp/ui/src/components/KnowledgeGraph.tsx` - FileLog panel
+- `amp/mcp-server/src/tools/query.rs` - Hybrid flags support
+- `amp/mcp-server/src/tools/files.rs` - File content tool
+
+**Status**: 🚀 AMP now features AI-powered code understanding with advanced hybrid retrieval
+

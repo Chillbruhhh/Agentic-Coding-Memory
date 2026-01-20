@@ -83,8 +83,16 @@ impl AmpClient {
 
     // Get file log
     pub async fn get_file_log(&self, path: &str) -> Result<Value> {
-        let url = format!("{}/v1/codebase/file-logs/{}", self.base_url, urlencoding::encode(path));
+        let encoded = urlencoding::encode(path);
+        let url = format!("{}/v1/codebase/file-log-objects/{}", self.base_url, encoded);
         let response = self.client.get(&url).send().await?;
+        if response.status().is_success() {
+            let data = response.json().await?;
+            return Ok(data);
+        }
+
+        let fallback_url = format!("{}/v1/codebase/file-logs/{}", self.base_url, encoded);
+        let response = self.client.get(&fallback_url).send().await?;
         let data = response.json().await?;
         Ok(data)
     }
@@ -93,6 +101,18 @@ impl AmpClient {
     pub async fn update_file_log(&self, payload: Value) -> Result<Value> {
         let url = format!("{}/v1/codebase/update-file-log", self.base_url);
         let response = self.client.post(&url).json(&payload).send().await?;
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    // Get stored file content from FileChunk objects
+    pub async fn get_file_content(&self, path: &str, max_chars: Option<usize>) -> Result<Value> {
+        let encoded = urlencoding::encode(path);
+        let mut url = format!("{}/v1/codebase/file-contents/{}", self.base_url, encoded);
+        if let Some(limit) = max_chars {
+            url = format!("{}?max_chars={}", url, limit);
+        }
+        let response = self.client.get(&url).send().await?;
         let data = response.json().await?;
         Ok(data)
     }

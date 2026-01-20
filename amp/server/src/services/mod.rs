@@ -4,3 +4,7 @@ pub mod hybrid;
 pub mod storage;
 pub mod codebase_parser;
 pub mod analytics;
+pub mod chunking;
+pub mod filelog_generator;
+pub mod settings;
+pub mod index_llm;

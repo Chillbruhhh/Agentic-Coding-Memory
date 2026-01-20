@@ -3,10 +3,11 @@ import { Sidebar } from './components/Sidebar';
 import { FileExplorer } from './components/FileExplorer';
 import { KnowledgeGraph } from './components/KnowledgeGraph';
 import { Analytics } from './components/Analytics';
+import { Settings } from './components/Settings';
 import { CustomTitleBar } from './components/CustomTitleBar';
 import { StatusBar } from './components/StatusBar';
 
-type ViewType = 'explorer' | 'graph' | 'analytics';
+type ViewType = 'explorer' | 'graph' | 'analytics' | 'settings';
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('explorer');
@@ -20,6 +21,8 @@ function App() {
         return <KnowledgeGraph />;
       case 'analytics':
         return <Analytics />;
+      case 'settings':
+        return <Settings />;
       default:
         return <FileExplorer onNavigateToGraph={() => setActiveView('graph')} />;
     }

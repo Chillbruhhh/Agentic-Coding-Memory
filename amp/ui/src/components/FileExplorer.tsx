@@ -172,13 +172,15 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
 
   const formatTimeAgo = (isoString: string) => {
     const date = new Date(isoString);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-    
-    if (diffHours < 1) return 'Just now';
-    if (diffHours < 24) return `${diffHours}h ago`;
-    return `${Math.floor(diffHours / 24)}d ago`;
+    if (isNaN(date.getTime())) return 'Unknown';
+
+    // Format as "Jan 20, 2026"
+    const options: Intl.DateTimeFormatOptions = {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    };
+    return date.toLocaleString('en-US', options);
   };
 
   return (

@@ -1,11 +1,16 @@
 use crate::client::AmpClient;
 use anyhow::Result;
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::sync::Arc;
 use walkdir::WalkDir;
 use uuid::Uuid;
 use chrono::Utc;
 use toml;
+use sha2::{Digest, Sha256};
+use tokio::sync::Semaphore;
+use tokio::task::JoinSet;
 
 pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Result<()> {
     println!("🔍 Indexing directory: {}", path);
@@ -64,6 +69,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     
     // Track created directories to avoid duplicates
     let mut created_dirs = std::collections::HashSet::new();
+    let mut created_dir_nodes: Vec<(PathBuf, String)> = Vec::new();
     
     // Walk directory and collect supported files
     let supported_extensions = vec!["py", "ts", "tsx", "js", "jsx", "rs", "md", "txt", "json", "toml", "yaml", "yml"];
@@ -89,9 +95,10 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                         
                         if !created_dirs.contains(&dir_key) && !dir_key.is_empty() {
                             match create_directory_node(parent, &project_object_id, &project_id, client).await {
-                                Ok(_dir_id) => {
+                                Ok(dir_id) => {
                                     created_directories += 1;
                                     created_dirs.insert(dir_key);
+                                    created_dir_nodes.push((parent.to_path_buf(), dir_id));
                                     println!("📂 Created directory node: {}", parent.display());
                                 }
                                 Err(e) => {
@@ -102,9 +109,14 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                     }
                 }
                 
-                // Check if it's a file (process all files, not just supported extensions)
+                // Check if it's a file and if it's a text file
                 if path.is_file() {
-                    files_to_process.push(path.to_path_buf());
+                    // Only process text files, skip binary files
+                    if is_text_file(path) {
+                        files_to_process.push(path.to_path_buf());
+                    } else {
+                        skipped_files.push(format!("Binary file: {}", path.display()));
+                    }
                 }
                 total_files += 1;
             }
@@ -124,18 +136,116 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
             println!("   {}", skip);
         }
     }
-    
-    // Process each file and create hierarchical structure
+
+    let (worker_count, index_ai_enabled) = match get_index_settings(client).await {
+        Ok(settings) => (settings.worker_count, settings.ai_enabled),
+        Err(e) => {
+            warnings.push(format!("Failed to load index settings: {}", e));
+            (4, true)
+        }
+    };
+    let worker_count = worker_count.clamp(1, 32);
+    println!("Index workers: {}", worker_count);
+
+    if index_ai_enabled && !created_dir_nodes.is_empty() {
+        println!("Generating directory AI logs ({} entries)...", created_dir_nodes.len());
+        let semaphore = Arc::new(Semaphore::new(worker_count));
+        let mut join_set = JoinSet::new();
+        for (dir_path, dir_id) in created_dir_nodes {
+            let permit = semaphore.clone().acquire_owned().await?;
+            let client = client.clone();
+            let project_id = project_id.clone();
+            join_set.spawn(async move {
+                let _permit = permit;
+                create_directory_ai_log_and_link(&dir_path, &dir_id, &project_id, &client).await?;
+                Ok::<(), anyhow::Error>(())
+            });
+        }
+        while let Some(result) = join_set.join_next().await {
+            if let Ok(Err(e)) = result {
+                warnings.push(format!("Directory AI log failed: {}", e));
+            }
+        }
+    }
+
+
+    // Create file nodes first so dependency edges can resolve reliably.
+    let semaphore = Arc::new(Semaphore::new(worker_count));
+    let mut join_set = JoinSet::new();
+    for file_path in &files_to_process {
+        let permit = semaphore.clone().acquire_owned().await?;
+        let client = client.clone();
+        let project_object_id = project_object_id.clone();
+        let project_id = project_id.clone();
+        let file_path = file_path.clone();
+        join_set.spawn(async move {
+            let _permit = permit;
+            let file_id = create_file_node(&file_path, &project_object_id, &project_id, &client).await?;
+            Ok::<(PathBuf, String), anyhow::Error>((file_path, file_id))
+        });
+    }
+
+    let mut file_index: HashMap<String, String> = HashMap::new();
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok(Ok((file_path, file_id))) => {
+                if let Some(key) = path_key(&file_path) {
+                    file_index.insert(key, file_id);
+                }
+            }
+            Ok(Err(e)) => errors.push(format!("Failed to create file node: {}", e)),
+            Err(e) => errors.push(format!("Failed to join file creation task: {}", e)),
+        }
+    }
+
+    let file_index = Arc::new(file_index);
+    let mut join_set = JoinSet::new();
     for file_path in files_to_process {
-        match process_file_hierarchical(&file_path, &project_object_id, &project_id, client).await {
-            Ok(symbols_count) => {
+        let key = match path_key(&file_path) {
+            Some(key) => key,
+            None => {
+                errors.push(format!("Failed to normalize path: {}", file_path.display()));
+                continue;
+            }
+        };
+        let file_id = match file_index.get(&key) {
+            Some(id) => id.clone(),
+            None => {
+                errors.push(format!("Missing file node for {}", file_path.display()));
+                continue;
+            }
+        };
+
+        let permit = semaphore.clone().acquire_owned().await?;
+        let client = client.clone();
+        let project_id = project_id.clone();
+        let root_path = root_path.to_path_buf();
+        let file_index = Arc::clone(&file_index);
+        join_set.spawn(async move {
+            let _permit = permit;
+            let symbols_count = process_file_hierarchical_with_id(
+                &file_path,
+                &file_id,
+                &project_id,
+                &root_path,
+                file_index.as_ref(),
+                index_ai_enabled,
+                &client,
+            )
+            .await?;
+            Ok::<(PathBuf, usize), anyhow::Error>((file_path, symbols_count))
+        });
+    }
+
+    while let Some(result) = join_set.join_next().await {
+        match result {
+            Ok(Ok((file_path, symbols_count))) => {
                 processed_files += 1;
                 created_symbols += symbols_count;
                 println!("✅ Processed {}: {} symbols", file_path.display(), symbols_count);
             }
-            Err(e) => {
-                errors.push(format!("Error processing {}: {}", file_path.display(), e));
-            }
+            Ok(Err(e)) => errors.push(format!("Error processing file: {}", e)),
+            Err(e) => errors.push(format!("Failed to join file processing task: {}", e)),
         }
     }
     
@@ -184,6 +294,29 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     Ok(())
 }
 
+struct IndexSettings {
+    worker_count: usize,
+    ai_enabled: bool,
+}
+
+async fn get_index_settings(client: &AmpClient) -> Result<IndexSettings> {
+    let settings = client.get_settings().await?;
+    let workers = settings
+        .get("indexWorkers")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(4) as usize;
+    let ai_enabled = settings
+        .get("indexProvider")
+        .and_then(|v| v.as_str())
+        .map(|value| value != "none")
+        .unwrap_or(true);
+    Ok(IndexSettings {
+        worker_count: workers,
+        ai_enabled,
+    })
+}
+
+
 pub fn should_exclude(path: &Path, exclude_patterns: &[String]) -> bool {
     let path_str = path.to_string_lossy();
     
@@ -208,6 +341,55 @@ pub fn should_exclude(path: &Path, exclude_patterns: &[String]) -> bool {
                     }
                 }
             }
+        }
+    }
+    
+    false
+}
+
+fn is_text_file(path: &Path) -> bool {
+    // Check by extension first
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        let text_extensions = [
+            "txt", "md", "json", "yaml", "yml", "toml", "xml", "html", "css", "scss",
+            "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "c", "cpp", "h", "hpp",
+            "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+            "sql", "graphql", "proto", "thrift",
+            "env", "gitignore", "dockerignore", "editorconfig",
+            "lock", "sum", "mod",
+        ];
+        
+        if text_extensions.contains(&ext.to_lowercase().as_str()) {
+            return true;
+        }
+        
+        // Skip known binary extensions
+        let binary_extensions = [
+            "png", "jpg", "jpeg", "gif", "bmp", "ico", "svg", "webp",
+            "mp3", "mp4", "avi", "mov", "wmv", "flv", "webm",
+            "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
+            "zip", "tar", "gz", "bz2", "7z", "rar",
+            "exe", "dll", "so", "dylib", "bin",
+            "wasm", "class", "jar", "war",
+            "ttf", "otf", "woff", "woff2", "eot",
+        ];
+        
+        if binary_extensions.contains(&ext.to_lowercase().as_str()) {
+            return false;
+        }
+    }
+    
+    // For files without extension or unknown extensions, try reading first bytes
+    if let Ok(mut file) = std::fs::File::open(path) {
+        use std::io::Read;
+        let mut buffer = [0u8; 512];
+        if let Ok(n) = file.read(&mut buffer) {
+            // Check for null bytes (strong indicator of binary)
+            if buffer[..n].contains(&0) {
+                return false;
+            }
+            // Check if valid UTF-8
+            return std::str::from_utf8(&buffer[..n]).is_ok();
         }
     }
     
@@ -302,7 +484,7 @@ async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<(St
     
     let project_symbol = json!({
         "id": object_id.clone(),
-        "type": "Symbol",
+        "type": "symbol",
         "tenant_id": "default",
         "project_id": project_id.clone(),
         "created_at": now.to_rfc3339(),
@@ -340,7 +522,7 @@ async fn create_directory_node(dir_path: &Path, project_object_id: &str, project
     
     let dir_symbol = json!({
         "id": dir_id.clone(),
-        "type": "Symbol",
+        "type": "symbol",
         "tenant_id": "default",
         "project_id": project_id,
         "created_at": now.to_rfc3339(),
@@ -370,27 +552,194 @@ async fn create_directory_node(dir_path: &Path, project_object_id: &str, project
         Ok(_) => println!("✅ Created relationship: project contains {}", dir_name),
         Err(e) => println!("⚠️  Failed to create relationship: {}", e),
     }
-    
+
+    // Symmetric relationship for traversal convenience
+    match client.create_relationship_direct(&dir_id, project_object_id, "defined_in").await {
+        Ok(_) => {},
+        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
+    }
     Ok(dir_id)
 }
 
-async fn process_file_hierarchical(file_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
-    println!("🔍 Processing file: {}", file_path.display());
+async fn create_directory_ai_log_and_link(
+    dir_path: &Path,
+    dir_id: &str,
+    project_id: &str,
+    client: &AmpClient,
+) -> Result<()> {
+    let dir_log = create_directory_log_ai(dir_path, dir_id, project_id, client).await?;
+    let log_id = dir_log.get("id").and_then(|v| v.as_str()).map(|v| v.to_string());
+    if let Err(e) = client.create_object(dir_log).await {
+        anyhow::bail!("Failed to create directory file log: {}", e);
+    }
+    if let Some(log_id) = log_id {
+        let _ = client.create_relationship_direct(dir_id, &log_id, "defined_in").await;
+        let _ = client.create_relationship_direct(&log_id, dir_id, "defined_in").await;
+    }
+    Ok(())
+}
+
+async fn process_file_hierarchical(
+    file_path: &Path,
+    project_object_id: &str,
+    project_id: &str,
+    root_path: &Path,
+    file_index: &mut HashMap<String, String>,
+    index_ai_enabled: bool,
+    client: &AmpClient
+) -> Result<usize> {
+    println!("Processing file: {}", file_path.display());
     
-    // First create a file node
+    // Create file node first
     let file_id = create_file_node(file_path, project_object_id, project_id, client).await?;
-    
-    // Then try to parse symbols within the file
-    match use_codebase_parser_hierarchical(file_path, &file_id, project_id, client).await {
-        Ok(count) => {
-            println!("✅ Codebase parser created {} symbols", count);
-            Ok(count + 1) // +1 for the file node itself
-        },
+    if let Some(key) = path_key(file_path) {
+        file_index.insert(key, file_id.clone());
+    }
+
+    process_file_hierarchical_with_id(
+        file_path,
+        &file_id,
+        project_id,
+        root_path,
+        file_index,
+        index_ai_enabled,
+        client,
+    )
+    .await
+}
+
+async fn process_file_hierarchical_with_id(
+    file_path: &Path,
+    file_id: &str,
+    project_id: &str,
+    root_path: &Path,
+    file_index: &HashMap<String, String>,
+    index_ai_enabled: bool,
+    client: &AmpClient,
+) -> Result<usize> {
+    // Parse and create symbols with relationships
+    let (symbol_count, dependency_paths, symbol_names) = match use_codebase_parser_hierarchical(file_path, file_id, project_id, client).await {
+        Ok((count, deps, names)) => {
+            println!("Codebase parser created {} symbols", count);
+            (count, deps, names)
+        }
         Err(e) => {
-            println!("⚠️  Codebase parser failed ({}), file node created", e);
-            Ok(1) // Just the file node
+            println!("Codebase parser failed: {}", e);
+            (0, Vec::new(), Vec::new())
+        }
+    };
+
+    // Create FileChunks and FileLog in batch (for embeddings)
+    let mut batch = Vec::new();
+    let chunks = create_file_chunks_objects(file_path, file_id, project_id)?;
+    if chunks.len() > 1 {
+        println!("Created {} chunks", chunks.len());
+    }
+    batch.extend(chunks);
+    
+    let file_log = if index_ai_enabled {
+        create_file_log_object_ai(file_path, file_id, project_id, &symbol_names, &dependency_paths, client).await?
+    } else {
+        create_file_log_object(file_path, file_id, project_id, &[])?
+    };
+    batch.push(file_log);
+    
+    let mut file_artifact_ids: Vec<String> = Vec::new();
+    for obj in &batch {
+        if let Some(id) = obj.get("id").and_then(|v| v.as_str()) {
+            file_artifact_ids.push(id.to_string());
         }
     }
+
+    if !batch.is_empty() {
+        match client.batch_create_objects(batch).await {
+            Ok(response) => {
+                if let Some(summary) = response.get("summary") {
+                    let succeeded = summary.get("succeeded").and_then(|v| v.as_u64()).unwrap_or(0);
+                    println!("Batch created {} chunks/logs", succeeded);
+                }
+            },
+            Err(e) => println!("Batch create failed: {}", e),
+        }
+    }
+
+    // Link file to its chunks/log for graph traversal
+    for artifact_id in file_artifact_ids {
+        match client.create_relationship_direct(file_id, &artifact_id, "defined_in").await {
+            Ok(_) => {}
+            Err(e) => println!("Failed to link file artifact: {}", e),
+        }
+        match client.create_relationship_direct(&artifact_id, file_id, "defined_in").await {
+            Ok(_) => {}
+            Err(e) => println!("Failed to link file artifact (reverse): {}", e),
+        }
+    }
+    
+    // Create dependency edges from parsed file log dependencies
+    if !dependency_paths.is_empty() {
+        for dep_path in dependency_paths {
+            if let Some(dep_id) = resolve_dependency_id(&dep_path, file_path, root_path, file_index) {
+                match client.create_relationship_direct(file_id, &dep_id, "depends_on").await {
+                    Ok(_) => {}
+                    Err(e) => println!("Failed to create dependency relationship: {}", e),
+                }
+            }
+        }
+    }
+
+    Ok(symbol_count + 1)
+}
+
+fn path_key(path: &Path) -> Option<String> {
+    let canonical = path.canonicalize().ok().unwrap_or_else(|| path.to_path_buf());
+    let mut key = canonical.to_string_lossy().to_string();
+    key = key.replace('/', "\\").to_lowercase();
+    Some(key)
+}
+
+fn resolve_dependency_id(
+    dep: &str,
+    file_path: &Path,
+    root_path: &Path,
+    file_index: &HashMap<String, String>,
+) -> Option<String> {
+    let resolved = resolve_dependency_path(dep, file_path, root_path)?;
+    let key = path_key(&resolved)?;
+    file_index.get(&key).cloned()
+}
+
+fn resolve_dependency_path(dep: &str, file_path: &Path, root_path: &Path) -> Option<PathBuf> {
+    let dep_path = Path::new(dep);
+    if dep_path.is_absolute() && dep_path.exists() {
+        return dep_path.canonicalize().ok().or_else(|| Some(dep_path.to_path_buf()));
+    }
+
+    let extensions = ["py", "ts", "tsx", "js", "jsx", "rs", "json", "toml", "yaml", "yml"];
+    let looks_like_path = dep.contains('\\') || dep.contains('/') || dep_path.extension().is_some();
+    if !looks_like_path {
+        return None;
+    }
+
+    let candidates = [
+        file_path.parent().map(|p| p.join(dep)),
+        Some(root_path.join(dep)),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.exists() {
+            return candidate.canonicalize().ok().or_else(|| Some(candidate));
+        }
+        if candidate.extension().is_none() {
+            for ext in extensions {
+                let with_ext = candidate.with_extension(ext);
+                if with_ext.exists() {
+                    return with_ext.canonicalize().ok().or_else(|| Some(with_ext));
+                }
+            }
+        }
+    }
+
+    None
 }
 
 async fn create_file_node(file_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
@@ -407,10 +756,16 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
     };
     
     let file_id = Uuid::new_v4().to_string();
+    let file_size = std::fs::metadata(file_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let line_count = std::fs::read_to_string(file_path)
+        .map(|content| content.lines().count() as u64)
+        .unwrap_or(0);
     
     let file_symbol = json!({
         "id": file_id.clone(),
-        "type": "Symbol",
+        "type": "symbol",
         "tenant_id": "default",
         "project_id": project_id,
         "created_at": now.to_rfc3339(),
@@ -425,6 +780,8 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
         "kind": "file",
         "path": file_path.to_string_lossy(),
         "language": language,
+        "file_size": file_size,
+        "line_count": line_count,
         "content_hash": format!("{:x}", md5::compute(file_name.as_bytes())),
         "signature": format!("file: {}", file_name),
         "documentation": format!("File: {}", file_path.display())
@@ -440,60 +797,14 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
         Ok(_) => println!("✅ Created relationship: project contains {}", file_name),
         Err(e) => println!("⚠️  Failed to create relationship: {}", e),
     }
-    
-    Ok(file_id)
-}
 
-async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
-    // Convert to absolute path to avoid server working directory issues
-    let absolute_path = file_path.canonicalize()
-        .map_err(|e| anyhow::anyhow!("Failed to get absolute path: {}", e))?;
-    
-    // Use the codebase parser endpoint to get detailed symbols
-    let parse_request = serde_json::json!({
-        "file_path": absolute_path.to_string_lossy(),
-        "project_id": project_id,
-        "tenant_id": "default"
-    });
-    
-    println!("🔍 Sending absolute path to parser: {}", absolute_path.display());
-    
-    let response = client.parse_file(parse_request).await?;
-    
-    // The response contains a file_log with symbols
-    if let Some(file_log) = response.get("file_log") {
-        if let Some(symbols) = file_log.get("symbols") {
-            if let Some(symbols_array) = symbols.as_array() {
-                println!("🔍 Found {} symbols in {}", symbols_array.len(), file_path.display());
-                
-                // Create AMP Symbol objects for each parsed symbol with file relationship
-                let mut created_count = 0;
-                for symbol_data in symbols_array {
-                    if let Ok(amp_symbol) = create_amp_symbol_from_parsed_hierarchical(symbol_data, file_path, file_id, project_id) {
-                        match client.create_object(amp_symbol.clone()).await {
-                            Ok(_) => {
-                                created_count += 1;
-                                // Create relationship: file defines symbol
-                                if let Some(symbol_id) = amp_symbol.get("id").and_then(|v| v.as_str()) {
-                                    let symbol_name = amp_symbol.get("name").and_then(|v| v.as_str()).unwrap_or("unknown");
-                                    match client.create_relationship_direct(file_id, symbol_id, "defined_in").await {
-                                        Ok(_) => println!("✅ Created relationship: {} defines {}", file_path.file_name().unwrap_or_default().to_string_lossy(), symbol_name),
-                                        Err(e) => println!("⚠️  Failed to create relationship: {}", e),
-                                    }
-                                }
-                            },
-                            Err(e) => println!("⚠️  Failed to create symbol: {}", e),
-                        }
-                    }
-                }
-                
-                return Ok(created_count);
-            }
-        }
+    // Symmetric relationship for traversal convenience
+    match client.create_relationship_direct(&file_id, project_object_id, "defined_in").await {
+        Ok(_) => {},
+        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
     }
     
-    // If no symbols found, create at least a file-level symbol
-    Ok(1)
+    Ok(file_id)
 }
 
 fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, file_path: &Path, _file_id: &str, project_id: &str) -> Result<serde_json::Value> {
@@ -525,7 +836,7 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
     
     let symbol = serde_json::json!({
         "id": uuid::Uuid::new_v4().to_string(),
-        "type": "Symbol",
+        "type": "symbol",
         "tenant_id": "default",
         "project_id": project_id,
         "created_at": now.to_rfc3339(),
@@ -586,7 +897,7 @@ pub fn create_file_symbol(file_path: &Path, content: &str, project_id: &str) -> 
     
     let symbol = json!({
         "id": Uuid::new_v4().to_string(),
-        "type": "Symbol",
+        "type": "symbol",
         "tenant_id": "default",
         "project_id": project_id,
         "created_at": now.to_rfc3339(),
@@ -640,4 +951,495 @@ mod tests {
         assert_eq!(symbol["language"], "python");
         assert_eq!(symbol["kind"], "file");
     }
+}
+
+
+async fn create_file_chunks(file_path: &Path, file_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
+    let content = std::fs::read_to_string(file_path)?;
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("rs") => "rust",
+        _ => "text",
+    };
+
+    let words: Vec<&str> = content.split_whitespace().collect();
+    let chunk_size = 500;
+    let overlap = 50;
+    
+    if words.len() <= chunk_size {
+        let chunk = create_chunk_object(file_path, file_id, project_id, &content, 0, 1, content.lines().count() as u32, language);
+        client.create_object(chunk).await?;
+        return Ok(1);
+    }
+
+    let mut created = 0;
+    let mut start_idx = 0;
+    let mut chunk_idx = 0;
+
+    while start_idx < words.len() {
+        let end_idx = (start_idx + chunk_size).min(words.len());
+        let chunk_words = &words[start_idx..end_idx];
+        let chunk_content = chunk_words.join(" ");
+        
+        let lines = content.lines().count();
+        let start_line = ((start_idx as f32 / words.len() as f32) * lines as f32) as u32 + 1;
+        let end_line = ((end_idx as f32 / words.len() as f32) * lines as f32) as u32 + 1;
+
+        let chunk = create_chunk_object(file_path, file_id, project_id, &chunk_content, chunk_idx, start_line, end_line, language);
+
+        match client.create_object(chunk).await {
+            Ok(_) => created += 1,
+            Err(e) => println!("⚠️  Failed to create chunk {}: {}", chunk_idx, e),
+        }
+
+        chunk_idx += 1;
+        start_idx = if end_idx < words.len() { end_idx - overlap } else { break };
+    }
+
+    Ok(created)
+}
+
+fn create_chunk_object(file_path: &Path, file_id: &str, project_id: &str, content: &str, chunk_index: u32, start_line: u32, end_line: u32, language: &str) -> serde_json::Value {
+    let now = chrono::Utc::now();
+    let content_hash = format!("{:x}", md5::compute(content.as_bytes()));
+    let token_count = content.split_whitespace().count() as u32;
+
+    serde_json::json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "type": "FileChunk",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": now.to_rfc3339(),
+        "updated_at": now.to_rfc3339(),
+        "provenance": { "source": "amp-cli-chunking", "confidence": 1.0, "method": "word-based-chunking" },
+        "links": [],
+        "file_path": file_path.to_string_lossy(),
+        "file_id": file_id,
+        "chunk_index": chunk_index,
+        "start_line": start_line,
+        "end_line": end_line,
+        "token_count": token_count,
+        "content": content,
+        "content_hash": content_hash,
+        "language": language
+    })
+}
+
+async fn create_file_log(file_path: &Path, file_id: &str, project_id: &str, symbols: &[serde_json::Value], client: &AmpClient) -> Result<()> {
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("rs") => "rust",
+        _ => "text",
+    };
+
+    let symbol_count = symbols.len();
+    let symbol_types: Vec<String> = symbols.iter().filter_map(|s| s.get("kind").and_then(|k| k.as_str()).map(|s| s.to_string())).collect();
+    
+    let purpose = if symbol_count > 0 {
+        format!("Contains {} symbols", symbol_count)
+    } else {
+        "Code file".to_string()
+    };
+
+    let key_symbols: Vec<String> = symbols.iter().filter_map(|s| {
+        let name = s.get("name").and_then(|n| n.as_str())?;
+        let kind = s.get("kind").and_then(|k| k.as_str())?;
+        Some(format!("{}:{}", kind, name))
+    }).take(20).collect();
+
+    let summary = format!("# {}\n\n**Language**: {}\n\n## Purpose\n{}\n\n## Symbols\n{}\n", file_path.display(), language, purpose, key_symbols.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n"));
+
+    let now = chrono::Utc::now();
+    let file_log = serde_json::json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "type": "FileLog",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": now.to_rfc3339(),
+        "updated_at": now.to_rfc3339(),
+        "provenance": { "source": "amp-cli-filelog", "confidence": 0.9, "method": "symbol-based-summary" },
+        "links": [],
+        "file_path": file_path.to_string_lossy(),
+        "file_id": file_id,
+        "summary": summary,
+        "summary_markdown": summary,
+        "purpose": purpose,
+        "key_symbols": key_symbols,
+        "dependencies": [],
+        "last_modified": now.to_rfc3339(),
+        "change_count": 0,
+        "linked_changesets": []
+    });
+
+    client.create_object(file_log).await?;
+    Ok(())
+}
+
+fn create_file_node_object(file_path: &Path, file_id: &str, project_id: &str) -> Result<Value> {
+    let now = Utc::now();
+    let file_name = file_path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        _ => "unknown",
+    };
+
+    let file_size = std::fs::metadata(file_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
+    let line_count = std::fs::read_to_string(file_path)
+        .map(|content| content.lines().count() as u64)
+        .unwrap_or(0);
+    
+    Ok(json!({
+        "id": file_id,
+        "type": "symbol",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": now.to_rfc3339(),
+        "updated_at": now.to_rfc3339(),
+        "provenance": {
+            "source": "amp-cli-index",
+            "confidence": 0.9,
+            "method": "file-scan"
+        },
+        "links": [],
+        "name": file_name,
+        "kind": "file",
+        "path": file_path.to_string_lossy(),
+        "language": language,
+        "file_size": file_size,
+        "line_count": line_count,
+        "content_hash": format!("{:x}", md5::compute(file_name.as_bytes())),
+        "signature": format!("file: {}", file_name),
+        "documentation": format!("File: {}", file_path.display())
+    }))
+}
+
+async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, project_id: &str, client: &AmpClient) -> Result<(usize, Vec<String>, Vec<String>)> {
+    let absolute_path = file_path.canonicalize()?;
+    
+    let parse_request = serde_json::json!({
+        "file_path": absolute_path.to_string_lossy(),
+        "project_id": project_id,
+        "tenant_id": "default"
+    });
+    
+    let response = client.parse_file(parse_request).await?;
+    
+    let mut dependencies: Vec<String> = Vec::new();
+    let mut symbol_names: Vec<String> = Vec::new();
+
+    if let Some(file_log) = response.get("file_log") {
+        if let Some(symbols) = file_log.get("symbols") {
+            if let Some(symbols_array) = symbols.as_array() {
+                let mut created_count = 0;
+                for symbol_data in symbols_array {
+                    if let Ok(amp_symbol) = create_amp_symbol_from_parsed_hierarchical(symbol_data, file_path, file_id, project_id) {
+                        match client.create_object(amp_symbol.clone()).await {
+                            Ok(_) => {
+                                created_count += 1;
+                                if let Some(symbol_id) = amp_symbol.get("id").and_then(|v| v.as_str()) {
+                                    match client.create_relationship_direct(file_id, symbol_id, "defined_in").await {
+                                        Ok(_) => {},
+                                        Err(e) => println!("⚠️  Failed to create relationship: {}", e),
+                                    }
+                                    match client.create_relationship_direct(symbol_id, file_id, "defined_in").await {
+                                        Ok(_) => {},
+                                        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
+                                    }
+                                }
+                            },
+                            Err(e) => println!("⚠️  Failed to create symbol: {}", e),
+                        }
+                    }
+                    if let Some(name) = symbol_data.get("name").and_then(|v| v.as_str()) {
+                        symbol_names.push(name.to_string());
+                    }
+                }
+                if let Some(deps) = file_log.get("dependencies") {
+                    if let Some(arr) = deps.as_array() {
+                        for dep in arr {
+                            if let Some(path) = dep.as_str() {
+                                dependencies.push(path.to_string());
+                            }
+                        }
+                    }
+                }
+
+                return Ok((created_count, dependencies, symbol_names));
+            }
+        }
+    }
+    
+    Ok((0, dependencies, symbol_names))
+}
+
+fn create_file_chunks_objects(file_path: &Path, file_id: &str, project_id: &str) -> Result<Vec<Value>> {
+    let content = std::fs::read_to_string(file_path)?;
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("rs") => "rust",
+        _ => "text",
+    };
+
+    let words: Vec<&str> = content.split_whitespace().collect();
+    let chunk_size = 500;
+    let overlap = 50;
+    
+    if words.len() <= chunk_size {
+        let chunk = create_chunk_object(file_path, file_id, project_id, &content, 0, 1, content.lines().count() as u32, language);
+        return Ok(vec![chunk]);
+    }
+
+    let mut chunks = Vec::new();
+    let mut start_idx = 0;
+    let mut chunk_idx = 0;
+
+    while start_idx < words.len() {
+        let end_idx = (start_idx + chunk_size).min(words.len());
+        let chunk_words = &words[start_idx..end_idx];
+        let chunk_content = chunk_words.join(" ");
+        
+        let lines = content.lines().count();
+        let start_line = ((start_idx as f32 / words.len() as f32) * lines as f32) as u32 + 1;
+        let end_line = ((end_idx as f32 / words.len() as f32) * lines as f32) as u32 + 1;
+
+        let chunk = create_chunk_object(file_path, file_id, project_id, &chunk_content, chunk_idx, start_line, end_line, language);
+        chunks.push(chunk);
+
+        chunk_idx += 1;
+        start_idx = if end_idx < words.len() { end_idx - overlap } else { break };
+    }
+
+    Ok(chunks)
+}
+
+fn create_file_log_object(file_path: &Path, file_id: &str, project_id: &str, symbols: &[Value]) -> Result<Value> {
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("rs") => "rust",
+        _ => "text",
+    };
+
+    let symbol_count = symbols.len();
+    let purpose = if symbol_count > 0 {
+        format!("Contains {} symbols", symbol_count)
+    } else {
+        "Code file".to_string()
+    };
+
+    let key_symbols: Vec<String> = symbols.iter().filter_map(|s| {
+        let name = s.get("name").and_then(|n| n.as_str())?;
+        let kind = s.get("kind").and_then(|k| k.as_str())?;
+        Some(format!("{}:{}", kind, name))
+    }).take(20).collect();
+
+    let summary = format!("# {}\n\n**Language**: {}\n\n## Purpose\n{}\n\n## Symbols\n{}\n", file_path.display(), language, purpose, key_symbols.iter().map(|s| format!("- {}", s)).collect::<Vec<_>>().join("\n"));
+
+    let now = chrono::Utc::now();
+    Ok(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "type": "FileLog",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": now.to_rfc3339(),
+        "updated_at": now.to_rfc3339(),
+        "provenance": { "source": "amp-cli-filelog", "confidence": 0.9, "method": "symbol-based-summary" },
+        "links": [],
+        "file_path": file_path.to_string_lossy(),
+        "file_id": file_id,
+        "summary": summary,
+        "summary_markdown": summary,
+        "purpose": purpose,
+        "key_symbols": key_symbols,
+        "dependencies": [],
+        "last_modified": now.to_rfc3339(),
+        "change_count": 0,
+        "linked_changesets": []
+    }))
+}
+
+async fn create_file_log_object_ai(
+    file_path: &Path,
+    file_id: &str,
+    project_id: &str,
+    symbols: &[String],
+    dependencies: &[String],
+    client: &AmpClient,
+) -> Result<Value> {
+    let language = match file_path.extension().and_then(|e| e.to_str()) {
+        Some("py") => "python",
+        Some("ts") | Some("tsx") => "typescript",
+        Some("js") | Some("jsx") => "javascript",
+        Some("rs") => "rust",
+        _ => "text",
+    };
+
+    let content = std::fs::read_to_string(file_path).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let content_hash = format!("sha256:{:x}", hasher.finalize());
+    let payload = serde_json::json!({
+        "file_path": file_path.to_string_lossy(),
+        "language": language,
+        "content_hash": content_hash,
+        "content": content,
+        "symbols": symbols,
+        "dependencies": dependencies,
+    });
+
+    match client.generate_ai_file_log(payload).await {
+        Ok(response) => {
+            if let Some(file_log) = response.get("file_log") {
+                return create_file_log_object_from_ai(file_path, file_id, project_id, file_log);
+            }
+            println!("⚠️  AI file log response missing file_log, using fallback");
+        }
+        Err(err) => {
+            println!("⚠️  AI file log generation failed: {}", err);
+        }
+    }
+
+    create_file_log_object(file_path, file_id, project_id, &[])
+}
+
+fn create_file_log_object_from_ai(
+    file_path: &Path,
+    file_id: &str,
+    project_id: &str,
+    ai_log: &Value,
+) -> Result<Value> {
+    let now = chrono::Utc::now();
+    let summary = ai_log.get("summary_markdown").and_then(|v| v.as_str()).unwrap_or("");
+    let purpose = ai_log.get("purpose").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let notes = ai_log.get("notes").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let key_symbols: Vec<String> = ai_log
+        .get("key_symbols")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.as_str().map(|v| v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let dependencies: Vec<String> = ai_log
+        .get("dependencies")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.as_str().map(|v| v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "type": "FileLog",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": now.to_rfc3339(),
+        "updated_at": now.to_rfc3339(),
+        "provenance": { "source": "amp-cli-filelog", "confidence": 0.9, "method": "ai-summary" },
+        "links": [],
+        "file_path": file_path.to_string_lossy(),
+        "file_id": file_id,
+        "summary": summary,
+        "summary_markdown": summary,
+        "purpose": purpose,
+        "key_symbols": key_symbols,
+        "dependencies": dependencies,
+        "notes": notes,
+        "last_modified": now.to_rfc3339(),
+        "change_count": 0,
+        "linked_changesets": []
+    }))
+}
+
+async fn create_directory_log_ai(
+    dir_path: &Path,
+    dir_id: &str,
+    project_id: &str,
+    client: &AmpClient,
+) -> Result<Value> {
+    let mut entries: Vec<String> = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(dir_path) {
+        for entry in read_dir.flatten().take(200) {
+            if let Some(name) = entry.file_name().to_str() {
+                entries.push(name.to_string());
+            }
+        }
+    }
+
+    let content = if entries.is_empty() {
+        "Directory contains no readable entries.".to_string()
+    } else {
+        format!("Directory entries:\n- {}", entries.join("\n- "))
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let content_hash = format!("sha256:{:x}", hasher.finalize());
+
+    let payload = serde_json::json!({
+        "file_path": dir_path.to_string_lossy(),
+        "language": "directory",
+        "content_hash": content_hash,
+        "content": content,
+        "symbols": [],
+        "dependencies": entries,
+    });
+
+    match client.generate_ai_file_log(payload).await {
+        Ok(response) => {
+            if let Some(file_log) = response.get("file_log") {
+                return create_file_log_object_from_ai(dir_path, dir_id, project_id, file_log);
+            }
+            println!("⚠️  Directory AI file log response missing file_log, using fallback");
+        }
+        Err(err) => {
+            println!("⚠️  Directory AI file log generation failed: {}", err);
+        }
+    }
+
+    let summary = format!(
+        "# FILE_LOG v1\npath: {}\nlanguage: directory\nlast_indexed: {}\ncontent_hash: {}\n\n## Symbols (current snapshot)\n- None\n\n## Dependencies (best-effort)\nimports:\n- None\nexports:\n- None\n\n## Recent Changes (rolling, last N)\n- None\n\n## Notes / Decisions linked\n- {}\n",
+        dir_path.to_string_lossy(),
+        chrono::Utc::now().to_rfc3339(),
+        content_hash,
+        if entries.is_empty() { "Directory contains no readable entries." } else { "See directory entries list." }
+    );
+
+    Ok(json!({
+        "id": uuid::Uuid::new_v4().to_string(),
+        "type": "FileLog",
+        "tenant_id": "default",
+        "project_id": project_id,
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "updated_at": chrono::Utc::now().to_rfc3339(),
+        "provenance": { "source": "amp-cli-filelog", "confidence": 0.7, "method": "directory-fallback" },
+        "links": [],
+        "file_path": dir_path.to_string_lossy(),
+        "file_id": dir_id,
+        "summary": summary,
+        "summary_markdown": summary,
+        "purpose": "Directory overview",
+        "key_symbols": [],
+        "dependencies": entries,
+        "notes": null,
+        "last_modified": chrono::Utc::now().to_rfc3339(),
+        "change_count": 0,
+        "linked_changesets": []
+    }))
 }

@@ -19,6 +19,8 @@ fn extract_object_id(obj: &AmpObject) -> Uuid {
         AmpObject::Decision(d) => d.base.id,
         AmpObject::ChangeSet(c) => c.base.id,
         AmpObject::Run(r) => r.base.id,
+        AmpObject::FileChunk(f) => f.base.id,
+        AmpObject::FileLog(f) => f.base.id,
     }
 }
 
@@ -29,16 +31,22 @@ fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
         AmpObject::Decision(d) => serde_json::to_value(d),
         AmpObject::ChangeSet(c) => serde_json::to_value(c),
         AmpObject::Run(r) => serde_json::to_value(r),
+        AmpObject::FileChunk(f) => serde_json::to_value(f),
+        AmpObject::FileLog(f) => serde_json::to_value(f),
     }.map_err(|err| {
         tracing::error!("Failed to serialize payload: {}", err);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-    // Remove fields that should be set by the database, but keep id for INSERT
+    // Set timestamps if not provided
     if let Some(map) = value.as_object_mut() {
-        // Don't remove id - INSERT needs it
-        map.remove("created_at");
-        map.remove("updated_at");
+        let now = chrono::Utc::now().to_rfc3339();
+        if !map.contains_key("created_at") || map.get("created_at").map(|v| v.is_null()).unwrap_or(true) {
+            map.insert("created_at".to_string(), serde_json::Value::String(now.clone()));
+        }
+        if !map.contains_key("updated_at") || map.get("updated_at").map(|v| v.is_null()).unwrap_or(true) {
+            map.insert("updated_at".to_string(), serde_json::Value::String(now));
+        }
     }
 
     // Convert to JSON string and back to ensure all enums are plain strings
@@ -62,6 +70,8 @@ fn set_embedding(mut obj: AmpObject, embedding: Option<Vec<f32>>) -> AmpObject {
         AmpObject::Decision(d) => d.base.embedding = embedding,
         AmpObject::ChangeSet(c) => c.base.embedding = embedding,
         AmpObject::Run(r) => r.base.embedding = embedding,
+        AmpObject::FileChunk(f) => f.base.embedding = embedding,
+        AmpObject::FileLog(f) => f.base.embedding = embedding,
     }
     obj
 }
@@ -158,6 +168,20 @@ fn extract_embedding_text(obj: &AmpObject) -> String {
                 }
             }
         }
+        AmpObject::FileChunk(chunk) => {
+            parts.push(chunk.file_path.clone());
+            parts.push(chunk.content.clone());
+            parts.push(chunk.language.clone());
+        }
+        AmpObject::FileLog(log) => {
+            parts.push(log.file_path.clone());
+            parts.push(log.summary.clone());
+            if let Some(purpose) = &log.purpose {
+                parts.push(purpose.clone());
+            }
+            parts.extend(log.key_symbols.clone());
+            parts.extend(log.dependencies.clone());
+        }
     }
 
     parts
@@ -199,13 +223,45 @@ pub async fn create_object(
 
     tracing::info!("Creating object: {}", object_id);
 
-    // Create with explicit ID using backtick syntax
+    // Parse the payload into proper SurrealDB format
+    let mut clean_payload = payload.clone();
+
+    // Generate embedding if enabled (for hybrid search)
+    if state.embedding_service.is_enabled() {
+        if let Some(text) = extract_text_for_embedding(&clean_payload) {
+            if !text.trim().is_empty() {
+                match state.embedding_service.generate_embedding(&text).await {
+                    Ok(embedding) => {
+                        if let Some(map) = clean_payload.as_object_mut() {
+                            map.insert("embedding".to_string(), serde_json::json!(embedding));
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to generate embedding for {}: {}", object_id, e);
+                    }
+                }
+            }
+        }
+    }
+
+    // Ensure proper field types for SurrealDB
+    if let Some(obj) = clean_payload.as_object_mut() {
+        // Remove id from content - CREATE objects:`id` CONTENT {...} sets the ID via the record path,
+        // including id in content causes: "Found 'id' for the `id` field, but a specific record has been specified"
+        obj.remove("id");
+
+        // Remove timestamps - let DB set them
+        obj.remove("created_at");
+        obj.remove("updated_at");
+    }
+
+    // Create with explicit ID using backtick syntax - but use proper JSON structure
     let query = format!("CREATE objects:`{}` CONTENT $data", object_id);
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
             .query(query)
-            .bind(("data", payload)),
+            .bind(("data", clean_payload)),
     )
     .await;
 
@@ -253,36 +309,49 @@ pub struct BatchSummary {
 
 pub async fn create_objects_batch(
     State(state): State<AppState>,
-    Json(payload): Json<Vec<AmpObject>>,
+    Json(payload): Json<Vec<Value>>,
 ) -> Result<(StatusCode, Json<BatchResponse>), StatusCode> {
     let mut results = Vec::new();
     let total = payload.len();
     let mut succeeded = 0;
     let mut failed = 0;
 
-    for obj in payload {
-        let obj = apply_embedding(&state, obj).await;
-        let content = match payload_to_content_value(&obj) {
-            Ok(value) => value,
-            Err(status) => {
-                let object_id = extract_object_id(&obj);
-                failed += 1;
-                results.push(BatchResult {
-                    id: object_id,
-                    status: "failed".to_string(),
-                    error: Some(format!("serialization failed: {}", status)),
-                });
-                continue;
+    for mut obj_value in payload {
+        let object_id = obj_value.get("id")
+            .and_then(|v| v.as_str())
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .unwrap_or_else(Uuid::new_v4);
+
+        // Generate embedding if enabled
+        if state.embedding_service.is_enabled() {
+            if let Some(text) = extract_text_for_embedding(&obj_value) {
+                if !text.trim().is_empty() {
+                    match state.embedding_service.generate_embedding(&text).await {
+                        Ok(embedding) => {
+                            if let Some(map) = obj_value.as_object_mut() {
+                                map.insert("embedding".to_string(), serde_json::json!(embedding));
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to generate embedding for {}: {}", object_id, e);
+                        }
+                    }
+                }
             }
-        };
-        let object_id = extract_object_id(&obj);
+        }
+
+        // Remove timestamps - let DB set them
+        if let Some(map) = obj_value.as_object_mut() {
+            map.remove("created_at");
+            map.remove("updated_at");
+        }
 
         let query = "INSERT INTO objects $data";
         let result: Result<Result<surrealdb::Response, _>, _> = timeout(
             Duration::from_secs(5),
             state.db.client
                 .query(query)
-                .bind(("data", content)),
+                .bind(("data", obj_value)),
         )
         .await;
 
@@ -328,6 +397,51 @@ pub async fn create_objects_batch(
         results,
         summary: BatchSummary { total, succeeded, failed },
     })))
+}
+
+fn extract_text_for_embedding(obj: &Value) -> Option<String> {
+    let obj_type = obj.get("type")?.as_str()?.to_lowercase();
+    let mut parts = Vec::new();
+
+    match obj_type.as_str() {
+        "symbol" => {
+            if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+                parts.push(name.to_string());
+            }
+            if let Some(kind) = obj.get("kind").and_then(|v| v.as_str()) {
+                parts.push(kind.to_string());
+            }
+            if let Some(path) = obj.get("path").and_then(|v| v.as_str()) {
+                parts.push(path.to_string());
+            }
+            if let Some(sig) = obj.get("signature").and_then(|v| v.as_str()) {
+                parts.push(sig.to_string());
+            }
+            if let Some(doc) = obj.get("documentation").and_then(|v| v.as_str()) {
+                parts.push(doc.to_string());
+            }
+        }
+        "filechunk" => {
+            if let Some(content) = obj.get("content").and_then(|v| v.as_str()) {
+                parts.push(content.to_string());
+            }
+        }
+        "filelog" => {
+            if let Some(summary) = obj.get("summary").and_then(|v| v.as_str()) {
+                parts.push(summary.to_string());
+            }
+            if let Some(purpose) = obj.get("purpose").and_then(|v| v.as_str()) {
+                parts.push(purpose.to_string());
+            }
+        }
+        _ => {}
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join(" "))
+    }
 }
 
 pub async fn get_object(

@@ -7,6 +7,8 @@ pub struct OpenAIEmbedding {
     client: Client,
     api_key: String,
     model: String,
+    base_url: String,
+    dimension: usize,
 }
 
 #[derive(Serialize)]
@@ -26,11 +28,13 @@ struct EmbeddingData {
 }
 
 impl OpenAIEmbedding {
-    pub fn new(api_key: String, model: String) -> Self {
+    pub fn new(api_key: String, model: String, base_url: String, dimension: usize) -> Self {
         Self {
             client: Client::new(),
             api_key,
             model,
+            base_url,
+            dimension,
         }
     }
 }
@@ -45,7 +49,7 @@ impl EmbeddingService for OpenAIEmbedding {
 
         let response = self
             .client
-            .post("https://api.openai.com/v1/embeddings")
+            .post(format!("{}/embeddings", self.base_url.trim_end_matches('/')))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request)
             .send()
@@ -67,7 +71,7 @@ impl EmbeddingService for OpenAIEmbedding {
     }
 
     fn dimension(&self) -> usize {
-        1536
+        self.dimension
     }
 
     fn is_enabled(&self) -> bool {

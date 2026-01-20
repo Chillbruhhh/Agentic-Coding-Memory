@@ -30,6 +30,7 @@ pub trait EmbeddingService: Send + Sync {
 pub fn create_embedding_service(
     provider: &str,
     openai_api_key: Option<String>,
+    openrouter_api_key: Option<String>,
     ollama_url: String,
     dimension: usize,
     model: String,
@@ -37,9 +38,27 @@ pub fn create_embedding_service(
     match provider.to_lowercase().as_str() {
         "openai" => {
             if let Some(api_key) = openai_api_key {
-                Box::new(openai::OpenAIEmbedding::new(api_key, model))
+                Box::new(openai::OpenAIEmbedding::new(
+                    api_key,
+                    model,
+                    "https://api.openai.com/v1".to_string(),
+                    dimension,
+                ))
             } else {
                 tracing::warn!("OpenAI provider selected but no API key provided, using None");
+                Box::new(none::NoneEmbedding)
+            }
+        }
+        "openrouter" => {
+            if let Some(api_key) = openrouter_api_key {
+                Box::new(openai::OpenAIEmbedding::new(
+                    api_key,
+                    model,
+                    "https://openrouter.ai/api/v1".to_string(),
+                    dimension,
+                ))
+            } else {
+                tracing::warn!("OpenRouter provider selected but no API key provided, using None");
                 Box::new(none::NoneEmbedding)
             }
         }

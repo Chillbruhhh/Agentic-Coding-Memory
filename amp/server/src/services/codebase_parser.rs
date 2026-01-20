@@ -407,6 +407,57 @@ impl CodebaseParser {
         
         markdown
     }
+
+    pub fn chunk_file_content(&self, content: &str, language: &str) -> Vec<super::chunking::ChunkData> {
+        let chunking_service = super::chunking::ChunkingService::new();
+        chunking_service.chunk_file(content, language)
+    }
+
+    pub fn generate_filelog_summary(&self, file_path: &str, symbols: &[ParsedSymbol], language: &str) -> (String, Vec<String>, Vec<String>) {
+        let filelog_gen = super::filelog_generator::FileLogGenerator::new();
+        
+        // Convert ParsedSymbol to Symbol for the generator
+        let mock_symbols: Vec<crate::models::Symbol> = symbols.iter().map(|ps| {
+            crate::models::Symbol {
+                base: crate::models::BaseObject {
+                    id: uuid::Uuid::new_v4(),
+                    object_type: crate::models::ObjectType::Symbol,
+                    tenant_id: "default".to_string(),
+                    project_id: "default".to_string(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    updated_at: chrono::Utc::now().to_rfc3339(),
+                    provenance: crate::models::Provenance {
+                        agent: "parser".to_string(),
+                        model: None,
+                        tools: None,
+                        summary: "Parsed from codebase".to_string(),
+                    },
+                    links: vec![],
+                    embedding: None,
+                },
+                name: ps.name.clone(),
+                kind: match ps.symbol_type.as_str() {
+                    "function" => crate::models::SymbolKind::Function,
+                    "class" => crate::models::SymbolKind::Class,
+                    "variable" => crate::models::SymbolKind::Variable,
+                    "module" => crate::models::SymbolKind::Module,
+                    "type" => crate::models::SymbolKind::Type,
+                    _ => crate::models::SymbolKind::Function,
+                },
+                path: ps.file_path.clone(),
+                language: ps.language.clone(),
+                content_hash: None,
+                signature: None,
+                documentation: None,
+            }
+        }).collect();
+
+        let summary = filelog_gen.generate_summary(file_path, &mock_symbols, language);
+        let key_symbols = filelog_gen.extract_key_symbols(&mock_symbols);
+        let dependencies = filelog_gen.extract_dependencies(&mock_symbols);
+
+        (summary, key_symbols, dependencies)
+    }
 }
 
 #[cfg(test)]
