@@ -40,6 +40,14 @@ pub struct FileDependencies {
 pub struct CodebaseParser {
     python_language: Language,
     typescript_language: Language,
+    javascript_language: Language,
+    rust_language: Language,
+    go_language: Language,
+    csharp_language: Language,
+    java_language: Language,
+    c_language: Language,
+    cpp_language: Language,
+    ruby_language: Language,
 }
 
 struct CodeQueries {
@@ -52,10 +60,26 @@ impl CodebaseParser {
     pub fn new() -> Result<Self> {
         let python_language = tree_sitter_python::language();
         let typescript_language = tree_sitter_typescript::language_typescript();
-        
+        let javascript_language = tree_sitter_javascript::language();
+        let rust_language = tree_sitter_rust::language();
+        let go_language = tree_sitter_go::language();
+        let csharp_language = tree_sitter_c_sharp::language();
+        let java_language = tree_sitter_java::language();
+        let c_language = tree_sitter_c::language();
+        let cpp_language = tree_sitter_cpp::language();
+        let ruby_language = tree_sitter_ruby::language();
+
         Ok(Self {
             python_language,
             typescript_language,
+            javascript_language,
+            rust_language,
+            go_language,
+            csharp_language,
+            java_language,
+            c_language,
+            cpp_language,
+            ruby_language,
         })
     }
     
@@ -138,10 +162,10 @@ impl CodebaseParser {
             
             (assignment_expression
               left: (identifier) @variable.name
-              right: [(arrow_function) (function_expression)]) @variable.definition
+              right: (arrow_function)) @variable.definition
             "#,
         )?;
-        
+
         let imports_query = Query::new(
             self.typescript_language,
             r#"
@@ -179,7 +203,493 @@ impl CodebaseParser {
             exports: exports_query,
         })
     }
-    
+
+    fn create_javascript_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.javascript_language,
+            r#"
+            (function_declaration
+              name: (identifier) @function.name) @function.definition
+
+            (class_declaration
+              name: (identifier) @class.name) @class.definition
+
+            (variable_declaration
+              (variable_declarator
+                name: (identifier) @variable.name)) @variable.definition
+
+            (method_definition
+              name: (property_identifier) @method.name) @method.definition
+
+            (arrow_function) @arrow_function.definition
+
+            (assignment_expression
+              left: (identifier) @variable.name
+              right: (arrow_function)) @variable.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.javascript_language,
+            r#"
+            (import_statement
+              source: (string) @import.source)
+
+            (import_statement
+              (import_clause
+                (named_imports
+                  (import_specifier
+                    name: (identifier) @import.name))))
+
+            (call_expression
+              function: (identifier) @func (#eq? @func "require")
+              arguments: (arguments (string) @import.source))
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.javascript_language,
+            r#"
+            (export_statement
+              (function_declaration
+                name: (identifier) @export.name))
+
+            (export_statement
+              (class_declaration
+                name: (identifier) @export.name))
+
+            (export_statement
+              declaration: (lexical_declaration
+                (variable_declarator
+                  name: (identifier) @export.name)))
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_rust_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.rust_language,
+            r#"
+            (function_item
+              name: (identifier) @function.name) @function.definition
+
+            (struct_item
+              name: (type_identifier) @struct.name) @struct.definition
+
+            (enum_item
+              name: (type_identifier) @enum.name) @enum.definition
+
+            (trait_item
+              name: (type_identifier) @trait.name) @trait.definition
+
+            (impl_item
+              type: (type_identifier) @impl.name) @impl.definition
+
+            (const_item
+              name: (identifier) @constant.name) @constant.definition
+
+            (static_item
+              name: (identifier) @static.name) @static.definition
+
+            (type_item
+              name: (type_identifier) @type.name) @type.definition
+
+            (mod_item
+              name: (identifier) @module.name) @module.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.rust_language,
+            r#"
+            (use_declaration
+              argument: (_) @import.path)
+
+            (extern_crate_declaration
+              name: (identifier) @import.crate)
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.rust_language,
+            r#"
+            (function_item
+              (visibility_modifier)
+              name: (identifier) @export.name)
+
+            (struct_item
+              (visibility_modifier)
+              name: (type_identifier) @export.name)
+
+            (enum_item
+              (visibility_modifier)
+              name: (type_identifier) @export.name)
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_go_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.go_language,
+            r#"
+            (function_declaration
+              name: (identifier) @function.name) @function.definition
+
+            (method_declaration
+              name: (field_identifier) @method.name) @method.definition
+
+            (type_declaration
+              (type_spec
+                name: (type_identifier) @type.name)) @type.definition
+
+            (const_declaration
+              (const_spec
+                name: (identifier) @constant.name)) @constant.definition
+
+            (var_declaration
+              (var_spec
+                name: (identifier) @variable.name)) @variable.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.go_language,
+            r#"
+            (import_declaration
+              (import_spec
+                path: (interpreted_string_literal) @import.path))
+
+            (import_declaration
+              (import_spec_list
+                (import_spec
+                  path: (interpreted_string_literal) @import.path)))
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.go_language,
+            r#"
+            (function_declaration
+              name: (identifier) @export.name)
+
+            (type_declaration
+              (type_spec
+                name: (type_identifier) @export.name))
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_csharp_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.csharp_language,
+            r#"
+            (class_declaration
+              name: (identifier) @class.name) @class.definition
+
+            (struct_declaration
+              name: (identifier) @struct.name) @struct.definition
+
+            (interface_declaration
+              name: (identifier) @interface.name) @interface.definition
+
+            (method_declaration
+              name: (identifier) @method.name) @method.definition
+
+            (property_declaration
+              name: (identifier) @property.name) @property.definition
+
+            (enum_declaration
+              name: (identifier) @enum.name) @enum.definition
+
+            (namespace_declaration
+              name: (_) @namespace.name) @namespace.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.csharp_language,
+            r#"
+            (using_directive
+              (identifier) @import.name)
+
+            (using_directive
+              (qualified_name) @import.name)
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.csharp_language,
+            r#"
+            (class_declaration
+              name: (identifier) @export.name)
+
+            (method_declaration
+              name: (identifier) @export.name)
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_java_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.java_language,
+            r#"
+            (class_declaration
+              name: (identifier) @class.name) @class.definition
+
+            (interface_declaration
+              name: (identifier) @interface.name) @interface.definition
+
+            (method_declaration
+              name: (identifier) @method.name) @method.definition
+
+            (constructor_declaration
+              name: (identifier) @constructor.name) @constructor.definition
+
+            (field_declaration
+              declarator: (variable_declarator
+                name: (identifier) @field.name)) @field.definition
+
+            (enum_declaration
+              name: (identifier) @enum.name) @enum.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.java_language,
+            r#"
+            (import_declaration
+              (scoped_identifier) @import.name)
+
+            (import_declaration
+              (identifier) @import.name)
+
+            (package_declaration
+              (scoped_identifier) @package.name)
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.java_language,
+            r#"
+            (class_declaration
+              name: (identifier) @export.name)
+
+            (interface_declaration
+              name: (identifier) @export.name)
+
+            (method_declaration
+              name: (identifier) @export.name)
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_c_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.c_language,
+            r#"
+            (function_definition
+              declarator: (function_declarator
+                declarator: (identifier) @function.name)) @function.definition
+
+            (struct_specifier
+              name: (type_identifier) @struct.name) @struct.definition
+
+            (enum_specifier
+              name: (type_identifier) @enum.name) @enum.definition
+
+            (declaration
+              declarator: (init_declarator
+                declarator: (identifier) @variable.name)) @variable.definition
+
+            (type_definition
+              declarator: (type_identifier) @typedef.name) @typedef.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.c_language,
+            r#"
+            (preproc_include
+              path: (string_literal) @include.path)
+
+            (preproc_include
+              path: (system_lib_string) @include.path)
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.c_language,
+            r#"
+            (function_definition
+              declarator: (function_declarator
+                declarator: (identifier) @export.name))
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_cpp_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.cpp_language,
+            r#"
+            (function_definition
+              declarator: (function_declarator
+                declarator: (identifier) @function.name)) @function.definition
+
+            (function_definition
+              declarator: (function_declarator
+                declarator: (qualified_identifier
+                  name: (identifier) @function.name))) @function.definition
+
+            (class_specifier
+              name: (type_identifier) @class.name) @class.definition
+
+            (struct_specifier
+              name: (type_identifier) @struct.name) @struct.definition
+
+            (enum_specifier
+              name: (type_identifier) @enum.name) @enum.definition
+
+            (namespace_definition
+              name: (namespace_identifier) @namespace.name) @namespace.definition
+
+            (template_declaration) @template.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.cpp_language,
+            r#"
+            (preproc_include
+              path: (string_literal) @include.path)
+
+            (preproc_include
+              path: (system_lib_string) @include.path)
+
+            (using_declaration
+              (identifier) @using.name)
+
+            (using_declaration
+              (qualified_identifier) @using.name)
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.cpp_language,
+            r#"
+            (function_definition
+              declarator: (function_declarator
+                declarator: (identifier) @export.name))
+
+            (class_specifier
+              name: (type_identifier) @export.name)
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
+    fn create_ruby_queries(&self) -> Result<CodeQueries> {
+        let symbols_query = Query::new(
+            self.ruby_language,
+            r#"
+            (method
+              name: (identifier) @method.name) @method.definition
+
+            (singleton_method
+              name: (identifier) @method.name) @method.definition
+
+            (class
+              name: (constant) @class.name) @class.definition
+
+            (module
+              name: (constant) @module.name) @module.definition
+
+            (assignment
+              left: (identifier) @variable.name) @variable.definition
+
+            (assignment
+              left: (constant) @constant.name) @constant.definition
+            "#,
+        )?;
+
+        let imports_query = Query::new(
+            self.ruby_language,
+            r#"
+            (call
+              method: (identifier) @method (#eq? @method "require")
+              arguments: (argument_list (string (string_content) @import.name)))
+
+            (call
+              method: (identifier) @method (#eq? @method "require_relative")
+              arguments: (argument_list (string (string_content) @import.name)))
+
+            (call
+              method: (identifier) @method (#eq? @method "load")
+              arguments: (argument_list (string (string_content) @import.name)))
+            "#,
+        )?;
+
+        let exports_query = Query::new(
+            self.ruby_language,
+            r#"
+            (class
+              name: (constant) @export.name)
+
+            (module
+              name: (constant) @export.name)
+
+            (method
+              name: (identifier) @export.name)
+            "#,
+        )?;
+
+        Ok(CodeQueries {
+            symbols: symbols_query,
+            imports: imports_query,
+            exports: exports_query,
+        })
+    }
+
     pub fn parse_codebase(&self, root_path: &Path) -> Result<HashMap<String, FileLog>> {
         let mut file_logs = HashMap::new();
         
@@ -200,6 +710,46 @@ impl CodebaseParser {
                         }
                         "ts" | "tsx" => {
                             if let Ok(file_log) = self.parse_file(path, "typescript") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "js" | "jsx" => {
+                            if let Ok(file_log) = self.parse_file(path, "javascript") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "rs" => {
+                            if let Ok(file_log) = self.parse_file(path, "rust") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "go" => {
+                            if let Ok(file_log) = self.parse_file(path, "go") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "cs" => {
+                            if let Ok(file_log) = self.parse_file(path, "csharp") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "java" => {
+                            if let Ok(file_log) = self.parse_file(path, "java") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "c" | "h" => {
+                            if let Ok(file_log) = self.parse_file(path, "c") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "cpp" | "cc" | "cxx" | "hpp" | "hxx" => {
+                            if let Ok(file_log) = self.parse_file(path, "cpp") {
+                                file_logs.insert(path.to_string_lossy().to_string(), file_log);
+                            }
+                        }
+                        "rb" | "rake" | "gemspec" => {
+                            if let Ok(file_log) = self.parse_file(path, "ruby") {
                                 file_logs.insert(path.to_string_lossy().to_string(), file_log);
                             }
                         }
@@ -225,6 +775,38 @@ impl CodebaseParser {
             "typescript" => {
                 parser.set_language(self.typescript_language)?;
                 self.create_typescript_queries()?
+            }
+            "javascript" => {
+                parser.set_language(self.javascript_language)?;
+                self.create_javascript_queries()?
+            }
+            "rust" => {
+                parser.set_language(self.rust_language)?;
+                self.create_rust_queries()?
+            }
+            "go" => {
+                parser.set_language(self.go_language)?;
+                self.create_go_queries()?
+            }
+            "csharp" => {
+                parser.set_language(self.csharp_language)?;
+                self.create_csharp_queries()?
+            }
+            "java" => {
+                parser.set_language(self.java_language)?;
+                self.create_java_queries()?
+            }
+            "c" => {
+                parser.set_language(self.c_language)?;
+                self.create_c_queries()?
+            }
+            "cpp" => {
+                parser.set_language(self.cpp_language)?;
+                self.create_cpp_queries()?
+            }
+            "ruby" => {
+                parser.set_language(self.ruby_language)?;
+                self.create_ruby_queries()?
             }
             _ => {
                 // For unsupported languages, return a basic file log without parsing
@@ -557,5 +1139,314 @@ export function createUser(name: string): User {
         assert!(markdown.contains("path: test.py"));
         assert!(markdown.contains("## Symbols"));
         assert!(markdown.contains("function: hello"));
+    }
+
+    #[test]
+    fn test_parse_javascript_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.js");
+        std::fs::write(&file_path, r#"
+import { useState } from 'react';
+
+function greet(name) {
+    console.log('Hello, ' + name);
+}
+
+class Calculator {
+    add(a, b) {
+        return a + b;
+    }
+}
+
+export const PI = 3.14159;
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "javascript").unwrap();
+
+        assert_eq!(file_log.language, "javascript");
+        assert!(file_log.symbols.len() >= 2); // function, class
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_rust_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.rs");
+        std::fs::write(&file_path, r#"
+use std::collections::HashMap;
+
+fn main() {
+    println!("Hello, world!");
+}
+
+pub struct Point {
+    x: f64,
+    y: f64,
+}
+
+impl Point {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+}
+
+pub enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "rust").unwrap();
+
+        assert_eq!(file_log.language, "rust");
+        assert!(file_log.symbols.len() >= 3); // function, struct, enum
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_go_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.go");
+        std::fs::write(&file_path, r#"
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+}
+
+type User struct {
+    Name string
+    Age  int
+}
+
+func (u *User) Greet() string {
+    return "Hello, " + u.Name
+}
+
+type Greeter interface {
+    Greet() string
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "go").unwrap();
+
+        assert_eq!(file_log.language, "go");
+        assert!(file_log.symbols.len() >= 3); // functions, struct, interface
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_csharp_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.cs");
+        std::fs::write(&file_path, r#"
+using System;
+using System.Collections.Generic;
+
+namespace MyApp
+{
+    public class Calculator
+    {
+        public int Add(int a, int b)
+        {
+            return a + b;
+        }
+    }
+
+    public interface ICalculator
+    {
+        int Add(int a, int b);
+    }
+
+    public enum Operation
+    {
+        Add,
+        Subtract,
+        Multiply,
+        Divide
+    }
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "csharp").unwrap();
+
+        assert_eq!(file_log.language, "csharp");
+        assert!(file_log.symbols.len() >= 3); // class, interface, enum
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_java_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("Test.java");
+        std::fs::write(&file_path, r#"
+package com.example;
+
+import java.util.List;
+import java.util.ArrayList;
+
+public class Calculator {
+    private int value;
+
+    public Calculator() {
+        this.value = 0;
+    }
+
+    public int add(int a, int b) {
+        return a + b;
+    }
+}
+
+interface Computable {
+    int compute(int x);
+}
+
+enum Operation {
+    ADD, SUBTRACT, MULTIPLY, DIVIDE
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "java").unwrap();
+
+        assert_eq!(file_log.language, "java");
+        assert!(file_log.symbols.len() >= 3); // class, interface, enum
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_c_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.c");
+        std::fs::write(&file_path, r#"
+#include <stdio.h>
+#include "myheader.h"
+
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+enum Color {
+    RED,
+    GREEN,
+    BLUE
+};
+
+int add(int a, int b) {
+    return a + b;
+}
+
+int main() {
+    printf("Hello, World!\n");
+    return 0;
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "c").unwrap();
+
+        assert_eq!(file_log.language, "c");
+        assert!(file_log.symbols.len() >= 2); // functions, struct, enum
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_cpp_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.cpp");
+        std::fs::write(&file_path, r#"
+#include <iostream>
+#include <vector>
+
+namespace math {
+
+class Calculator {
+public:
+    int add(int a, int b) {
+        return a + b;
+    }
+};
+
+struct Point {
+    double x;
+    double y;
+};
+
+enum class Color {
+    Red,
+    Green,
+    Blue
+};
+
+}
+
+int main() {
+    std::cout << "Hello, World!" << std::endl;
+    return 0;
+}
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "cpp").unwrap();
+
+        assert_eq!(file_log.language, "cpp");
+        assert!(file_log.symbols.len() >= 3); // class, struct, enum, namespace, function
+        assert!(file_log.dependencies.imports.len() >= 1);
+    }
+
+    #[test]
+    fn test_parse_ruby_file() {
+        let parser = CodebaseParser::new().unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("test.rb");
+        std::fs::write(&file_path, r#"
+require 'json'
+require_relative 'helper'
+
+module Calculator
+  VERSION = "1.0.0"
+
+  class Basic
+    def initialize(value)
+      @value = value
+    end
+
+    def add(a, b)
+      a + b
+    end
+
+    def self.create
+      new(0)
+    end
+  end
+end
+
+def greet(name)
+  puts "Hello, #{name}!"
+end
+"#).unwrap();
+
+        let file_log = parser.parse_file(&file_path, "ruby").unwrap();
+
+        assert_eq!(file_log.language, "ruby");
+        assert!(file_log.symbols.len() >= 3); // module, class, methods
+        assert!(file_log.dependencies.imports.len() >= 1);
     }
 }

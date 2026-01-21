@@ -2,6 +2,15 @@ use reqwest::Client;
 use serde_json::Value;
 use anyhow::Result;
 use uuid::Uuid;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static CLIENT_QUIET: AtomicBool = AtomicBool::new(false);
+
+fn client_log(message: &str) {
+    if !CLIENT_QUIET.load(Ordering::Relaxed) {
+        println!("{}", message);
+    }
+}
 
 #[derive(Clone)]
 pub struct AmpClient {
@@ -15,6 +24,10 @@ impl AmpClient {
             client: Client::new(),
             base_url: base_url.to_string(),
         }
+    }
+
+    pub fn set_quiet(&self, quiet: bool) {
+        CLIENT_QUIET.store(quiet, Ordering::Relaxed);
     }
 
     pub async fn create_object(&self, object: Value) -> Result<Value> {
@@ -148,7 +161,10 @@ impl AmpClient {
             _ => "defined_in", // Default fallback
         };
         
-        println!("🔗 Creating relationship: {} -> {} ({})", source_uuid, target_uuid, relation_enum);
+        client_log(&format!(
+            "Creating relationship: {} -> {} ({})",
+            source_uuid, target_uuid, relation_enum
+        ));
         
         let relationship = serde_json::json!({
             "type": relation_enum,
@@ -190,7 +206,10 @@ impl AmpClient {
             "target_id": to_id
         });
         
-        println!("🔗 Creating relationship: {} -> {} -> {}", from_id, relation_enum, to_id);
+        client_log(&format!(
+            "Creating relationship: {} -> {} -> {}",
+            from_id, relation_enum, to_id
+        ));
         
         let response = self.client
             .post(&format!("{}/v1/relationships", self.base_url))
@@ -200,7 +219,7 @@ impl AmpClient {
         
         if response.status().is_success() {
             let result = response.json().await?;
-            println!("🔗 Relationship created successfully");
+            client_log("Relationship created successfully");
             Ok(result)
         } else {
             let status = response.status();

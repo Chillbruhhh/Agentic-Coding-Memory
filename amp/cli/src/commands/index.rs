@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use walkdir::WalkDir;
 use uuid::Uuid;
 use chrono::Utc;
@@ -11,14 +12,78 @@ use toml;
 use sha2::{Digest, Sha256};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
+use std::sync::Mutex;
+use std::io::IsTerminal;
+
+use crate::commands::index_ui::{start_index_ui, IndexUiHandle, IndexUiState};
+
+static INDEX_QUIET: AtomicBool = AtomicBool::new(false);
+
+macro_rules! index_log {
+    ($($arg:tt)*) => {
+        if !INDEX_QUIET.load(Ordering::Relaxed) {
+            println!($($arg)*);
+        }
+    };
+}
+
+fn with_ui_state(state: &Arc<Mutex<IndexUiState>>, use_tui: bool, f: impl FnOnce(&mut IndexUiState)) {
+    if !use_tui {
+        return;
+    }
+    if let Ok(mut guard) = state.lock() {
+        f(&mut guard);
+    }
+}
+
+fn check_cancel(cancel_flag: &AtomicBool) -> Result<()> {
+    if cancel_flag.load(Ordering::Relaxed) {
+        anyhow::bail!("Indexing cancelled by user.");
+    }
+    Ok(())
+}
+
+struct UiGuard {
+    handle: Option<IndexUiHandle>,
+}
+
+impl Drop for UiGuard {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.stop();
+        }
+    }
+}
 
 pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Result<()> {
-    println!("🔍 Indexing directory: {}", path);
+    let use_tui = std::io::stdout().is_terminal();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    if use_tui {
+        INDEX_QUIET.store(true, Ordering::Relaxed);
+        client.set_quiet(true);
+    }
+    let ui_state = Arc::new(Mutex::new(IndexUiState::default()));
+    let mut ui_guard = UiGuard { handle: None };
+
+    if use_tui {
+        with_ui_state(&ui_state, use_tui, |state| {
+            state.phase = "Startup".to_string();
+            state.status_message = "Initializing AMP index".to_string();
+        });
+        ui_guard.handle = Some(start_index_ui(Arc::clone(&ui_state), Arc::clone(&cancel_flag))?);
+    } else {
+        index_log!("Indexing directory: {}", path);
+    }
     
     // Check if AMP server is available
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "Health check".to_string();
+        state.status_message = "Checking AMP server".to_string();
+    });
     if !client.health_check().await? {
         anyhow::bail!("AMP server is not available. Please start the server first.");
     }
+    check_cancel(&cancel_flag)?;
     
     let root_path = Path::new(path);
     if !root_path.exists() {
@@ -27,7 +92,13 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     
     // Create project root node first
     let (project_object_id, project_id) = create_project_node(root_path, client).await?;
-    println!("📁 Created project node: {} (id: {})", project_id, project_object_id);
+    if !use_tui {
+        index_log!("Created project node: {} (id: {})", project_id, project_object_id);
+    }
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "Scanning".to_string();
+        state.status_message = format!("Project: {}", project_id);
+    });
     
     let mut total_files = 0;
     let mut processed_files = 0;
@@ -65,7 +136,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     ];
     exclude_patterns.extend_from_slice(exclude);
     
-    println!("📋 Exclude patterns: {:?}", exclude_patterns);
+    if !use_tui {
+        index_log!("Exclude patterns: {:?}", exclude_patterns);
+    }
     
     // Track created directories to avoid duplicates
     let mut created_dirs = std::collections::HashSet::new();
@@ -77,6 +150,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     let mut skipped_files = Vec::new();
     
     for entry in WalkDir::new(root_path).follow_links(false) {
+        check_cancel(&cancel_flag)?;
         match entry {
             Ok(entry) => {
                 let path = entry.path();
@@ -99,10 +173,13 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                                     created_directories += 1;
                                     created_dirs.insert(dir_key);
                                     created_dir_nodes.push((parent.to_path_buf(), dir_id));
-                                    println!("📂 Created directory node: {}", parent.display());
+                                    if !use_tui {
+                                        index_log!("Created directory node: {}", parent.display());
+                                    }
                                 }
                                 Err(e) => {
                                     errors.push(format!("Failed to create directory node for {}: {}", parent.display(), e));
+                                    with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
                                 }
                             }
                         }
@@ -119,21 +196,38 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                     }
                 }
                 total_files += 1;
+                with_ui_state(&ui_state, use_tui, |state| {
+                    state.total_files = total_files;
+                    state.supported_files = files_to_process.len();
+                    state.created_directories = created_directories;
+                    state.current_path = path.display().to_string();
+                });
             }
             Err(e) => {
                 errors.push(format!("Error walking directory: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
             }
         }
     }
     
-    println!("\n📊 Found {} supported files out of {} total files", files_to_process.len(), total_files);
-    println!("📂 Created {} directory nodes", created_directories);
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "Indexing".to_string();
+        state.supported_files = files_to_process.len();
+        state.total_files = total_files;
+        state.created_directories = created_directories;
+        state.status_message = "Preparing file nodes".to_string();
+    });
+    check_cancel(&cancel_flag)?;
+    if !use_tui {
+        index_log!("\nFound {} supported files out of {} total files", files_to_process.len(), total_files);
+        index_log!("Created {} directory nodes", created_directories);
+    }
     
     // Show first 10 skipped files for debugging
-    if !skipped_files.is_empty() {
-        println!("\n⚠️  Skipped {} files (showing first 10):", skipped_files.len());
+    if !skipped_files.is_empty() && !use_tui {
+        index_log!("\nSkipped {} files (showing first 10):", skipped_files.len());
         for skip in skipped_files.iter().take(10) {
-            println!("   {}", skip);
+            index_log!("   {}", skip);
         }
     }
 
@@ -141,17 +235,27 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         Ok(settings) => (settings.worker_count, settings.ai_enabled),
         Err(e) => {
             warnings.push(format!("Failed to load index settings: {}", e));
+            with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
             (4, true)
         }
     };
     let worker_count = worker_count.clamp(1, 32);
-    println!("Index workers: {}", worker_count);
+    if !use_tui {
+        index_log!("Index workers: {}", worker_count);
+    }
 
     if index_ai_enabled && !created_dir_nodes.is_empty() {
-        println!("Generating directory AI logs ({} entries)...", created_dir_nodes.len());
+        with_ui_state(&ui_state, use_tui, |state| {
+            state.phase = "Directory logs".to_string();
+            state.status_message = format!("Generating {} directory logs", created_dir_nodes.len());
+        });
+        if !use_tui {
+            index_log!("Generating directory AI logs ({} entries)...", created_dir_nodes.len());
+        }
         let semaphore = Arc::new(Semaphore::new(worker_count));
         let mut join_set = JoinSet::new();
         for (dir_path, dir_id) in created_dir_nodes {
+            check_cancel(&cancel_flag)?;
             let permit = semaphore.clone().acquire_owned().await?;
             let client = client.clone();
             let project_id = project_id.clone();
@@ -162,17 +266,27 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
             });
         }
         while let Some(result) = join_set.join_next().await {
+            if cancel_flag.load(Ordering::Relaxed) {
+                join_set.abort_all();
+                anyhow::bail!("Indexing cancelled by user.");
+            }
             if let Ok(Err(e)) = result {
                 warnings.push(format!("Directory AI log failed: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
             }
         }
     }
 
 
     // Create file nodes first so dependency edges can resolve reliably.
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "File nodes".to_string();
+        state.status_message = format!("Creating {} file nodes", files_to_process.len());
+    });
     let semaphore = Arc::new(Semaphore::new(worker_count));
     let mut join_set = JoinSet::new();
     for file_path in &files_to_process {
+        check_cancel(&cancel_flag)?;
         let permit = semaphore.clone().acquire_owned().await?;
         let client = client.clone();
         let project_object_id = project_object_id.clone();
@@ -187,24 +301,40 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
 
     let mut file_index: HashMap<String, String> = HashMap::new();
     while let Some(result) = join_set.join_next().await {
+        if cancel_flag.load(Ordering::Relaxed) {
+            join_set.abort_all();
+            anyhow::bail!("Indexing cancelled by user.");
+        }
         match result {
             Ok(Ok((file_path, file_id))) => {
                 if let Some(key) = path_key(&file_path) {
                     file_index.insert(key, file_id);
                 }
             }
-            Ok(Err(e)) => errors.push(format!("Failed to create file node: {}", e)),
-            Err(e) => errors.push(format!("Failed to join file creation task: {}", e)),
+            Ok(Err(e)) => {
+                errors.push(format!("Failed to create file node: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
+            }
+            Err(e) => {
+                errors.push(format!("Failed to join file creation task: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
+            }
         }
     }
 
     let file_index = Arc::new(file_index);
     let mut join_set = JoinSet::new();
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "Parsing".to_string();
+        state.status_message = "Processing files".to_string();
+    });
     for file_path in files_to_process {
+        check_cancel(&cancel_flag)?;
         let key = match path_key(&file_path) {
             Some(key) => key,
             None => {
                 errors.push(format!("Failed to normalize path: {}", file_path.display()));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
                 continue;
             }
         };
@@ -212,6 +342,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
             Some(id) => id.clone(),
             None => {
                 errors.push(format!("Missing file node for {}", file_path.display()));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
                 continue;
             }
         };
@@ -238,56 +369,91 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     }
 
     while let Some(result) = join_set.join_next().await {
+        if cancel_flag.load(Ordering::Relaxed) {
+            join_set.abort_all();
+            anyhow::bail!("Indexing cancelled by user.");
+        }
         match result {
             Ok(Ok((file_path, symbols_count))) => {
                 processed_files += 1;
                 created_symbols += symbols_count;
-                println!("✅ Processed {}: {} symbols", file_path.display(), symbols_count);
+                if !use_tui {
+                    index_log!("Processed {}: {} symbols", file_path.display(), symbols_count);
+                }
+                with_ui_state(&ui_state, use_tui, |state| {
+                    state.processed_files = processed_files;
+                    state.created_symbols = created_symbols;
+                    state.current_path = file_path.display().to_string();
+                    state.status_message = "Processing files".to_string();
+                });
             }
-            Ok(Err(e)) => errors.push(format!("Error processing file: {}", e)),
-            Err(e) => errors.push(format!("Failed to join file processing task: {}", e)),
+            Ok(Err(e)) => {
+                errors.push(format!("Error processing file: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
+            }
+            Err(e) => {
+                errors.push(format!("Failed to join file processing task: {}", e));
+                with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
+            }
         }
     }
     
-    // Print summary
-    println!("\n🎉 Indexing complete!");
-    println!("📊 Summary:");
-    println!("   Project: 1 node");
-    println!("   Directories: {} nodes", created_directories);
-    println!("   Files processed: {}", processed_files);
-    println!("   Code symbols: {}", created_symbols);
-    println!("   Total nodes: {}", 1 + created_directories + processed_files + created_symbols);
-    
-    // Show project name detection info
-    println!("\n📝 Project Name Detection:");
-    if let Some(detected_name) = detect_project_name(root_path) {
-        println!("   ✅ Detected from config file: {}", detected_name);
-    } else {
-        let fallback_name = root_path.file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project");
-        println!("   ⚠️  No config file found, using directory name: {}", fallback_name);
+    with_ui_state(&ui_state, use_tui, |state| {
+        state.phase = "Complete".to_string();
+        state.status_message = "Indexing complete".to_string();
+        state.processed_files = processed_files;
+        state.created_symbols = created_symbols;
+        state.created_directories = created_directories;
+        state.done = true;
+    });
+
+    if !use_tui {
+        // Print summary
+        index_log!("\nIndexing complete!");
+        index_log!("Summary:");
+        index_log!("   Project: 1 node");
+        index_log!("   Directories: {} nodes", created_directories);
+        index_log!("   Files processed: {}", processed_files);
+        index_log!("   Code symbols: {}", created_symbols);
+        index_log!("   Total nodes: {}", 1 + created_directories + processed_files + created_symbols);
+
+        // Show project name detection info
+        index_log!("\nProject Name Detection:");
+        if let Some(detected_name) = detect_project_name(root_path) {
+            index_log!("   Detected from config file: {}", detected_name);
+        } else {
+            let fallback_name = root_path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project");
+            index_log!("   No config file found, using directory name: {}", fallback_name);
+        }
     }
     
     // Show skipped files for debugging
-    if !skipped_files.is_empty() {
-        println!("\n⚠️  Skipped {} files:", skipped_files.len());
+    if !skipped_files.is_empty() && !use_tui {
+        index_log!("\nSkipped {} files:", skipped_files.len());
         for skip in skipped_files.iter() {
-            println!("   {}", skip);
+            index_log!("   {}", skip);
         }
     }
     
-    if !errors.is_empty() {
-        println!("\n❌ Errors encountered ({}):", errors.len());
+    if !errors.is_empty() && !use_tui {
+        index_log!("\nErrors encountered ({}):", errors.len());
         for error in &errors {
-            println!("   - {}", error);
+            index_log!("   - {}", error);
         }
     }
-    
-    if !warnings.is_empty() {
-        println!("\n⚠️  Warnings ({}):", warnings.len());
+
+    if !warnings.is_empty() && !use_tui {
+        index_log!("\nWarnings ({}):", warnings.len());
         for warning in &warnings {
-            println!("   - {}", warning);
+            index_log!("   - {}", warning);
+        }
+    }
+
+    if use_tui {
+        if let Some(handle) = ui_guard.handle.take() {
+            handle.wait_for_exit()?;
         }
     }
     
@@ -397,7 +563,7 @@ fn is_text_file(path: &Path) -> bool {
 }
 
 async fn process_file(file_path: &Path, client: &AmpClient) -> Result<usize> {
-    println!("🔍 Processing file: {}", file_path.display());
+    index_log!(" Processing file: {}", file_path.display());
     
     // Read file content for fallback
     let content = match std::fs::read_to_string(file_path) {
@@ -473,9 +639,9 @@ async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<(St
         });
     
     if detect_project_name(root_path).is_some() {
-        println!("📝 Using project name from configuration: {}", project_name);
+        index_log!(" Using project name from configuration: {}", project_name);
     } else {
-        println!("📁 Using directory name as project name: {}", project_name);
+        index_log!(" Using directory name as project name: {}", project_name);
     }
     
     // Use project name as the project_id (sanitized)
@@ -549,14 +715,14 @@ async fn create_directory_node(dir_path: &Path, project_object_id: &str, project
     
     // Create relationship: project contains directory
     match client.create_relationship_direct(project_object_id, &dir_id, "defined_in").await {
-        Ok(_) => println!("✅ Created relationship: project contains {}", dir_name),
-        Err(e) => println!("⚠️  Failed to create relationship: {}", e),
+        Ok(_) => index_log!(" Created relationship: project contains {}", dir_name),
+        Err(e) => index_log!("  Failed to create relationship: {}", e),
     }
 
     // Symmetric relationship for traversal convenience
     match client.create_relationship_direct(&dir_id, project_object_id, "defined_in").await {
         Ok(_) => {},
-        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
+        Err(e) => index_log!("  Failed to create reverse relationship: {}", e),
     }
     Ok(dir_id)
 }
@@ -588,7 +754,7 @@ async fn process_file_hierarchical(
     index_ai_enabled: bool,
     client: &AmpClient
 ) -> Result<usize> {
-    println!("Processing file: {}", file_path.display());
+    index_log!("Processing file: {}", file_path.display());
     
     // Create file node first
     let file_id = create_file_node(file_path, project_object_id, project_id, client).await?;
@@ -620,11 +786,11 @@ async fn process_file_hierarchical_with_id(
     // Parse and create symbols with relationships
     let (symbol_count, dependency_paths, symbol_names) = match use_codebase_parser_hierarchical(file_path, file_id, project_id, client).await {
         Ok((count, deps, names)) => {
-            println!("Codebase parser created {} symbols", count);
+            index_log!("Codebase parser created {} symbols", count);
             (count, deps, names)
         }
         Err(e) => {
-            println!("Codebase parser failed: {}", e);
+            index_log!("Codebase parser failed: {}", e);
             (0, Vec::new(), Vec::new())
         }
     };
@@ -633,7 +799,7 @@ async fn process_file_hierarchical_with_id(
     let mut batch = Vec::new();
     let chunks = create_file_chunks_objects(file_path, file_id, project_id)?;
     if chunks.len() > 1 {
-        println!("Created {} chunks", chunks.len());
+        index_log!("Created {} chunks", chunks.len());
     }
     batch.extend(chunks);
     
@@ -656,10 +822,10 @@ async fn process_file_hierarchical_with_id(
             Ok(response) => {
                 if let Some(summary) = response.get("summary") {
                     let succeeded = summary.get("succeeded").and_then(|v| v.as_u64()).unwrap_or(0);
-                    println!("Batch created {} chunks/logs", succeeded);
+                    index_log!("Batch created {} chunks/logs", succeeded);
                 }
             },
-            Err(e) => println!("Batch create failed: {}", e),
+            Err(e) => index_log!("Batch create failed: {}", e),
         }
     }
 
@@ -667,11 +833,11 @@ async fn process_file_hierarchical_with_id(
     for artifact_id in file_artifact_ids {
         match client.create_relationship_direct(file_id, &artifact_id, "defined_in").await {
             Ok(_) => {}
-            Err(e) => println!("Failed to link file artifact: {}", e),
+            Err(e) => index_log!("Failed to link file artifact: {}", e),
         }
         match client.create_relationship_direct(&artifact_id, file_id, "defined_in").await {
             Ok(_) => {}
-            Err(e) => println!("Failed to link file artifact (reverse): {}", e),
+            Err(e) => index_log!("Failed to link file artifact (reverse): {}", e),
         }
     }
     
@@ -681,7 +847,7 @@ async fn process_file_hierarchical_with_id(
             if let Some(dep_id) = resolve_dependency_id(&dep_path, file_path, root_path, file_index) {
                 match client.create_relationship_direct(file_id, &dep_id, "depends_on").await {
                     Ok(_) => {}
-                    Err(e) => println!("Failed to create dependency relationship: {}", e),
+                    Err(e) => index_log!("Failed to create dependency relationship: {}", e),
                 }
             }
         }
@@ -794,14 +960,14 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
     
     // Create relationship: project contains file
     match client.create_relationship_direct(project_object_id, &file_id, "defined_in").await {
-        Ok(_) => println!("✅ Created relationship: project contains {}", file_name),
-        Err(e) => println!("⚠️  Failed to create relationship: {}", e),
+        Ok(_) => index_log!(" Created relationship: project contains {}", file_name),
+        Err(e) => index_log!("  Failed to create relationship: {}", e),
     }
 
     // Symmetric relationship for traversal convenience
     match client.create_relationship_direct(&file_id, project_object_id, "defined_in").await {
         Ok(_) => {},
-        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
+        Err(e) => index_log!("  Failed to create reverse relationship: {}", e),
     }
     
     Ok(file_id)
@@ -991,7 +1157,7 @@ async fn create_file_chunks(file_path: &Path, file_id: &str, project_id: &str, c
 
         match client.create_object(chunk).await {
             Ok(_) => created += 1,
-            Err(e) => println!("⚠️  Failed to create chunk {}: {}", chunk_idx, e),
+            Err(e) => index_log!("  Failed to create chunk {}: {}", chunk_idx, e),
         }
 
         chunk_idx += 1;
@@ -1150,15 +1316,15 @@ async fn use_codebase_parser_hierarchical(file_path: &Path, file_id: &str, proje
                                 if let Some(symbol_id) = amp_symbol.get("id").and_then(|v| v.as_str()) {
                                     match client.create_relationship_direct(file_id, symbol_id, "defined_in").await {
                                         Ok(_) => {},
-                                        Err(e) => println!("⚠️  Failed to create relationship: {}", e),
+                                        Err(e) => index_log!("  Failed to create relationship: {}", e),
                                     }
                                     match client.create_relationship_direct(symbol_id, file_id, "defined_in").await {
                                         Ok(_) => {},
-                                        Err(e) => println!("⚠️  Failed to create reverse relationship: {}", e),
+                                        Err(e) => index_log!("  Failed to create reverse relationship: {}", e),
                                     }
                                 }
                             },
-                            Err(e) => println!("⚠️  Failed to create symbol: {}", e),
+                            Err(e) => index_log!("  Failed to create symbol: {}", e),
                         }
                     }
                     if let Some(name) = symbol_data.get("name").and_then(|v| v.as_str()) {
@@ -1306,10 +1472,10 @@ async fn create_file_log_object_ai(
             if let Some(file_log) = response.get("file_log") {
                 return create_file_log_object_from_ai(file_path, file_id, project_id, file_log);
             }
-            println!("⚠️  AI file log response missing file_log, using fallback");
+            index_log!("  AI file log response missing file_log, using fallback");
         }
         Err(err) => {
-            println!("⚠️  AI file log generation failed: {}", err);
+            index_log!("  AI file log generation failed: {}", err);
         }
     }
 
@@ -1406,10 +1572,10 @@ async fn create_directory_log_ai(
             if let Some(file_log) = response.get("file_log") {
                 return create_file_log_object_from_ai(dir_path, dir_id, project_id, file_log);
             }
-            println!("⚠️  Directory AI file log response missing file_log, using fallback");
+            index_log!("  Directory AI file log response missing file_log, using fallback");
         }
         Err(err) => {
-            println!("⚠️  Directory AI file log generation failed: {}", err);
+            index_log!("  Directory AI file log generation failed: {}", err);
         }
     }
 

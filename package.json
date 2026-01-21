@@ -1,0 +1,28 @@
+{
+  "name": "acm",
+  "version": "1.0.0",
+  "description": "<p align=\"center\">   <img src=\"amp/public/assets/AMP-banner.png\" alt=\"AMP Banner\" width=\"800\"/> </p>",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs",
+    "example": "examples"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chillbruhhh/Agentic-Coding-Memory.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Chillbruhhh/Agentic-Coding-Memory/issues"
+  },
+  "homepage": "https://github.com/Chillbruhhh/Agentic-Coding-Memory#readme",
+  "dependencies": {
+    "figlet": "^1.9.4"
+  }
+}
