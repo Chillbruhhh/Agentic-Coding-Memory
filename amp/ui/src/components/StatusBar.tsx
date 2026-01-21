@@ -47,6 +47,9 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activeView, loading = fals
       case 'graph':
         setLanguage('3D Force');
         break;
+      case 'sessions':
+        setLanguage('Run Log');
+        break;
       case 'analytics':
         setLanguage('React');
         break;
@@ -61,6 +64,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({ activeView, loading = fals
         return 'File Explorer';
       case 'graph':
         return 'Knowledge Graph';
+      case 'sessions':
+        return 'Sessions';
       case 'analytics':
         return 'Analytics';
       default:

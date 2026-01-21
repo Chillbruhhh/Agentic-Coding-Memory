@@ -1,57 +1,95 @@
-version: '3.8'
-
 services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2.4.0
+    command: >
+      start --log info --user root --pass root --bind 0.0.0.0:7505 file:/data/amp.db
+    user: "0:0"
+    ports:
+      - "7505:7505"
+    environment:
+      - RUST_LOG=info
+    volumes:
+      - surreal-data:/data
+    networks:
+      - amp-network
+
   amp-server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
+    working_dir: /app/amp
+    command: bash -c "cargo run -p amp-server"
     ports:
       - "8105:8105"
     environment:
+      - PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - CARGO_HOME=/usr/local/cargo
+      - LIBCLANG_PATH=/usr/lib/x86_64-linux-gnu
       - PORT=8105
       - BIND_ADDRESS=0.0.0.0
-      - DATABASE_URL=file:///data/amp.db
+      - DATABASE_URL=ws://surrealdb:7505
+      - DB_USER=root
+      - DB_PASS=root
       - RUST_LOG=info
     volumes:
-      - amp-data:/data
+      - ./:/app/amp
+      - C:\Users:/workspace:ro
+      - cargo-target:/app/amp/target
+      - cargo-registry-server:/usr/local/cargo/registry
+      - cargo-git-server:/usr/local/cargo/git
+    depends_on:
+      - surrealdb
     networks:
       - amp-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8105/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
 
   amp-ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
+    image: node:20
+    working_dir: /app/ui
+    command: bash -lc "npm install && npm run dev -- --host 0.0.0.0 --port 8109"
     ports:
-      - "3000:3000"
+      - "8109:8109"
     environment:
       - VITE_AMP_SERVER_URL=http://amp-server:8105
+    volumes:
+      - ./ui:/app/ui
+      - ui-node-modules:/app/ui/node_modules
     depends_on:
       - amp-server
     networks:
       - amp-network
 
   amp-mcp-server:
-    build:
-      context: ./mcp-server
-      dockerfile: Dockerfile
+    image: rust:latest
+    working_dir: /app/amp
+    command: bash -c "cargo run -p amp-mcp-server"
+    ports:
+      - "8106:8106"
     environment:
+      - PATH=/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - CARGO_HOME=/usr/local/cargo
       - AMP_SERVER_URL=http://amp-server:8105
       - AMP_SERVER_TIMEOUT=30
+      - MCP_TRANSPORT=sse
+      - MCP_PORT=8106
       - RUST_LOG=info
+    volumes:
+      - ./:/app/amp
+      - cargo-target:/app/amp/target
+      - cargo-registry-mcp:/usr/local/cargo/registry
+      - cargo-git-mcp:/usr/local/cargo/git
     depends_on:
       - amp-server
     networks:
       - amp-network
-    stdin_open: true
-    tty: true
 
 volumes:
-  amp-data:
+  surreal-data:
+  cargo-target:
+  cargo-registry-server:
+  cargo-git-server:
+  cargo-registry-mcp:
+  cargo-git-mcp:
+  ui-node-modules:
 
 networks:
   amp-network:

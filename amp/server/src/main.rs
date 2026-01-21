@@ -178,6 +178,7 @@ fn api_routes() -> Router<AppState> {
         // Codebase parsing endpoints
         .route("/codebase/parse", post(handlers::codebase::parse_codebase))
         .route("/codebase/parse-file", post(handlers::codebase::parse_file))
+        .route("/codebase/delete", post(handlers::codebase::delete_codebase))
         .route("/codebase/file-logs", get(handlers::codebase::get_file_logs))
         .route("/codebase/file-logs/:path", get(handlers::codebase::get_file_log))
         .route("/codebase/file-log-objects/:path", get(handlers::codebase::get_file_log_object))

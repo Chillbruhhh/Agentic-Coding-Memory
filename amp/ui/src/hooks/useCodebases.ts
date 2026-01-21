@@ -164,7 +164,9 @@ export const useCodebases = () => {
       }
       
       console.log('Extracted objects:', objects.slice(0, 3)); // Debug first 3 objects
-      
+
+      objects = objects.filter(obj => (obj.type || '').toLowerCase() === 'symbol');
+
       if (objects.length === 0) {
         throw new Error('No parsed codebases found. Run CLI indexing first.');
       }

@@ -2,12 +2,13 @@ import React, { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { FileExplorer } from './components/FileExplorer';
 import { KnowledgeGraph } from './components/KnowledgeGraph';
+import { Sessions } from './components/Sessions';
 import { Analytics } from './components/Analytics';
 import { Settings } from './components/Settings';
 import { CustomTitleBar } from './components/CustomTitleBar';
 import { StatusBar } from './components/StatusBar';
 
-type ViewType = 'explorer' | 'graph' | 'analytics' | 'settings';
+type ViewType = 'explorer' | 'graph' | 'sessions' | 'analytics' | 'settings';
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('explorer');
@@ -19,6 +20,8 @@ function App() {
         return <FileExplorer onNavigateToGraph={() => setActiveView('graph')} />;
       case 'graph':
         return <KnowledgeGraph />;
+      case 'sessions':
+        return <Sessions />;
       case 'analytics':
         return <Analytics />;
       case 'settings':

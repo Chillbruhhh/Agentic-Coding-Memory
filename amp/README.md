@@ -70,6 +70,14 @@ Environment variables:
 - `EMBEDDING_SERVICE_URL` - Optional embedding service endpoint
 - `MAX_EMBEDDING_DIMENSION` - Max embedding dimensions (default: 1536, range: 1-10000)
 
+### Windows + Docker Path Mapping
+
+When running `amp-server` in Docker on Windows, the compose setup mounts `C:\Users` into the container at `/workspace` (read-only). The server maps Windows paths to `/workspace/...` automatically for parsing.
+
+Override the defaults if you want a narrower mount:
+- `AMP_WINDOWS_MOUNT_ROOT` (default: `C:\Users`)
+- `AMP_WORKSPACE_MOUNT` (default: `/workspace`)
+
 ## Architecture
 
 - **Server**: Rust + Axum + SurrealDB

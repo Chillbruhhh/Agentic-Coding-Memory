@@ -10,6 +10,7 @@ pub struct AmpStatusInput {}
 pub struct AmpListInput {
     #[serde(rename = "type")]
     pub object_type: Option<String>,
+    pub symbol_kind: Option<String>,
     pub limit: Option<i32>,
     pub sort: Option<String>,
 }
@@ -30,17 +31,50 @@ pub async fn handle_amp_list(
     client: &crate::amp_client::AmpClient,
     input: AmpListInput,
 ) -> Result<Vec<Content>> {
+    let requested_limit = input.limit.unwrap_or(10).min(20);
+    let mut object_type = input.object_type.clone();
+    let mut symbol_kind = input.symbol_kind.clone();
+
+    if object_type.as_deref() == Some("project") {
+        object_type = Some("symbol".to_string());
+        if symbol_kind.is_none() {
+            symbol_kind = Some("project".to_string());
+        }
+    }
+
+    if symbol_kind.is_some() && object_type.is_none() {
+        object_type = Some("symbol".to_string());
+    }
+
+    let query_limit = if symbol_kind.is_some() { 200 } else { requested_limit };
+
     let mut query = serde_json::json!({
-        "limit": input.limit.unwrap_or(10).min(20)  // Cap at 20 items
+        "limit": query_limit  // Cap at 20 items
     });
 
-    if let Some(obj_type) = &input.object_type {
+    if let Some(obj_type) = &object_type {
         query["filters"] = serde_json::json!({
             "type": [obj_type]
         });
     }
 
-    let result = client.query(query).await?;
+    let mut result = if let Some(kind) = symbol_kind.clone() {
+        query_symbols_by_kind(client, &kind, requested_limit).await?
+    } else {
+        client.query(query).await?
+    };
+
+    if let Some(kind) = symbol_kind {
+        if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
+            let filtered = results
+                .iter()
+                .filter(|item| matches_symbol_kind(item, &kind))
+                .cloned()
+                .take(requested_limit as usize)
+                .collect::<Vec<_>>();
+            result["results"] = serde_json::Value::Array(filtered);
+        }
+    }
     
     // Summarize list instead of returning raw JSON
     let summary = summarize_list_results(&result, &input)?;
@@ -108,4 +142,41 @@ fn summarize_list_results(result: &serde_json::Value, input: &AmpListInput) -> R
     }
     
     Ok(summary)
+}
+
+async fn query_symbols_by_kind(
+    client: &crate::amp_client::AmpClient,
+    kind: &str,
+    requested_limit: i32,
+) -> Result<serde_json::Value> {
+    let scan_limit = 200.max(requested_limit as usize);
+    let query = serde_json::json!({
+        "limit": scan_limit,
+        "filters": {
+            "type": ["symbol"]
+        }
+    });
+
+    let mut result = client.query(query).await?;
+    if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
+        let filtered = results
+            .iter()
+            .filter(|item| matches_symbol_kind(item, kind))
+            .cloned()
+            .take(requested_limit as usize)
+            .collect::<Vec<_>>();
+        result["results"] = serde_json::Value::Array(filtered);
+    }
+
+    Ok(result)
+}
+
+fn matches_symbol_kind(item: &serde_json::Value, kind: &str) -> bool {
+    let obj = item.get("object").unwrap_or(item);
+    let obj_kind = obj.get("kind").and_then(|value| value.as_str());
+    if kind == "project" {
+        let path = obj.get("path").and_then(|value| value.as_str());
+        return obj_kind == Some("project") || (obj_kind == Some("directory") && path == Some("."));
+    }
+    obj_kind == Some(kind)
 }

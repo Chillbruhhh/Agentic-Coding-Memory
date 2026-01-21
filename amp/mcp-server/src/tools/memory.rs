@@ -80,12 +80,16 @@ pub async fn handle_run_start(
 ) -> Result<Vec<Content>> {
     let payload = serde_json::json!({
         "type": "run",
-        "content": {
-            "goal": input.goal,
-            "repo_id": input.repo_id,
-            "agent_name": input.agent_name,
-            "status": "running"
-        }
+        "tenant_id": "default",
+        "project_id": input.repo_id,
+        "provenance": {
+            "agent": input.agent_name,
+            "summary": input.goal,
+            "model": null,
+            "tools": null
+        },
+        "input_summary": input.goal,
+        "status": "running"
     });
 
     let result = client.create_object(payload).await?;
@@ -97,10 +101,24 @@ pub async fn handle_run_end(
     client: &crate::amp_client::AmpClient,
     input: AmpRunEndInput,
 ) -> Result<Vec<Content>> {
+    let mut outputs = Vec::new();
+    if !input.summary.trim().is_empty() {
+        outputs.push(serde_json::json!({
+            "type": "response",
+            "content": input.summary,
+            "metadata": { "kind": "summary" }
+        }));
+    }
+    outputs.extend(input.outputs.into_iter().map(|output| {
+        serde_json::json!({
+            "type": "response",
+            "content": output
+        })
+    }));
+
     let payload = serde_json::json!({
         "status": input.status,
-        "outputs": input.outputs,
-        "summary": input.summary
+        "outputs": outputs
     });
 
     let result = client.update_object(&input.run_id, payload).await?;

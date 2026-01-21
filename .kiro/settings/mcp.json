@@ -18,12 +18,12 @@
       ]
     },
     "amp": {
-      "command": "/mnt/c/Users/Joshc/source/repos/ACM/amp/target/release/amp-mcp-server.exe",
-      "args": [],
-      "env": {
-        "AMP_SERVER_URL": "http://localhost:8105",
-        "RUST_LOG": "info"
-      }
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8106/mcp",
+        "allow-http"
+      ]
     }
   }
 }

@@ -365,7 +365,7 @@ pub async fn query(
 }
 
 fn build_query_string(request: &QueryRequest) -> String {
-    let mut base_query = "SELECT VALUE { id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding } FROM objects".to_string();
+    let mut base_query = "SELECT VALUE { id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding, input_summary: input_summary, status: status, duration_ms: duration_ms, confidence: confidence } FROM objects".to_string();
     let mut conditions = Vec::new();
     
     // Text search
@@ -423,7 +423,7 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     
-    let mut inner_query = "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding FROM objects WHERE embedding IS NOT NONE AND embedding IS NOT NULL".to_string();
+    let mut inner_query = "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding, input_summary, status, duration_ms, confidence FROM objects WHERE embedding IS NOT NONE AND embedding IS NOT NULL".to_string();
     
     let mut conditions = Vec::new();
     
@@ -463,12 +463,12 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
     // Limit
     let limit = request.limit.unwrap_or(10);
     let inner_ranked_query = format!(
-        "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding, vector::similarity::cosine(embedding, [{}]) AS similarity FROM ({}) ORDER BY similarity DESC LIMIT {}",
+        "SELECT id, type, tenant_id, project_id, name, kind, path, language, signature, documentation, provenance, links, embedding, input_summary, status, duration_ms, confidence, vector::similarity::cosine(embedding, [{}]) AS similarity FROM ({}) ORDER BY similarity DESC LIMIT {}",
         vector_str, inner_query, limit
     );
     
     format!(
-        "SELECT VALUE {{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding, similarity: similarity }} FROM ({})",
+        "SELECT VALUE {{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding, input_summary: input_summary, status: status, duration_ms: duration_ms, confidence: confidence, similarity: similarity }} FROM ({})",
         inner_ranked_query
     )
 }
@@ -476,7 +476,7 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
 fn build_graph_query_string(graph: &GraphQuery, filters: Option<&QueryFilters>, limit: usize) -> String {
     let direction = graph.direction.as_ref().unwrap_or(&GraphDirection::Outbound);
     let max_depth = graph.max_depth.unwrap_or(3);
-    let projection = "{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding }";
+    let projection = "{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, kind: kind, path: path, language: language, signature: signature, documentation: documentation, provenance: provenance, links: links, embedding: embedding, input_summary: input_summary, status: status, duration_ms: duration_ms, confidence: confidence }";
     
     // Build the start node list
     let start_ids_list = graph.start_nodes.iter()

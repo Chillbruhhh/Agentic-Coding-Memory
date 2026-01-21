@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { HiFolder, HiFolderOpen, HiChevronRight, HiChevronDown, HiSearch, HiViewGrid, HiViewList, HiCog, HiDocumentText, HiCode, HiX, HiExternalLink } from 'react-icons/hi';
+import { HiFolder, HiFolderOpen, HiChevronRight, HiChevronDown, HiSearch, HiDocumentText, HiCode, HiX } from 'react-icons/hi';
 import { IoCreateOutline } from 'react-icons/io5';
 import { BiFile, BiGitBranch, BiNetworkChart } from 'react-icons/bi';
+import { GiTrashCan } from 'react-icons/gi';
 import { useCodebases, CodebaseProject, FileNode } from '../hooks/useCodebases';
 import { KnowledgeGraphModal } from './KnowledgeGraphModal';
 import { FileContentViewer } from './FileContentViewer';
@@ -153,6 +154,39 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
   const { codebases, loading, error, refetch } = useCodebases();
   const [selectedCodebase, setSelectedCodebase] = useState<CodebaseProject | null>(null);
   const [knowledgeGraphCodebase, setKnowledgeGraphCodebase] = useState<CodebaseProject | null>(null);
+  const [deleteConfirmCodebase, setDeleteConfirmCodebase] = useState<CodebaseProject | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteCodebase = async (codebase: CodebaseProject) => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch('http://localhost:8105/v1/codebase/delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          codebase_id: codebase.id,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete codebase');
+      }
+
+      const result = await response.json();
+      console.log('Deleted codebase:', result);
+      
+      // Refresh the codebases list
+      await refetch();
+      setDeleteConfirmCodebase(null);
+    } catch (err) {
+      console.error('Error deleting codebase:', err);
+      alert('Failed to delete codebase. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -228,7 +262,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
                     {codebase.description}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 ml-2">
+                <div className="flex items-center gap-1 ml-2">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -236,12 +270,21 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
                         onNavigateToGraph();
                       }
                     }}
-                    className="p-2 hover:bg-primary/20 rounded text-slate-500 hover:text-primary transition-colors border border-transparent hover:border-primary/50"
+                    className="p-2 hover:bg-primary/20 rounded text-slate-400 hover:text-primary transition-colors"
                     title="View Knowledge Graph"
                   >
-                    <BiNetworkChart size={18} />
+                    <BiNetworkChart size={20} />
                   </button>
-                  <HiExternalLink className="text-slate-500 group-hover:text-primary transition-colors" />
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setDeleteConfirmCodebase(codebase);
+                    }}
+                    className="p-2 hover:bg-red-500/20 rounded text-slate-400 hover:text-red-400 transition-colors"
+                    title="Delete Codebase"
+                  >
+                    <GiTrashCan size={20} />
+                  </button>
                 </div>
               </div>
 
@@ -300,6 +343,55 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
           codebase={knowledgeGraphCodebase}
           onClose={() => setKnowledgeGraphCodebase(null)}
         />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmCodebase && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-panel-dark border border-red-500/50 rounded-lg w-full max-w-md p-6">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="p-3 bg-red-500/20 rounded-lg">
+                <GiTrashCan className="text-red-400" size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-200 mb-2">Delete Codebase?</h3>
+                <p className="text-sm text-slate-400 mb-1">
+                  Are you sure you want to delete <span className="text-slate-200 font-medium">{deleteConfirmCodebase.name}</span>?
+                </p>
+                <p className="text-sm text-red-400">
+                  This will permanently delete all files, symbols, relationships, and embeddings. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setDeleteConfirmCodebase(null)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteCodebase(deleteConfirmCodebase)}
+                disabled={isDeleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <GiTrashCan size={16} />
+                    Delete Codebase
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -14,9 +14,12 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 
-# MCP SDK
-rmcp = { version = "0.13.0", features = ["server", "transport-io"] }
-schemars = "0.8"
+# MCP SDK - using streamable HTTP transport (SSE successor in 0.13.0)
+rmcp = { version = "0.13.0", features = ["server", "transport-io", "transport-streamable-http-server"] }
+schemars = "1.0"
+
+# For HTTP transport (included by rmcp but needed for our router)
+axum = "0.8"
 
 # HTTP client for AMP API
 reqwest = { version = "0.11", features = ["json"] }

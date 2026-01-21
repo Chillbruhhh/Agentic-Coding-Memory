@@ -1,9 +1,11 @@
 import React from 'react';
-import { HiFolder, HiChartBar, HiLightningBolt } from 'react-icons/hi';
-import { BiNetworkChart } from 'react-icons/bi';
+import { HiFolder, HiLightningBolt } from 'react-icons/hi';
+import { GiNetworkBars } from 'react-icons/gi';
+import { GoWorkflow } from 'react-icons/go';
+import { SiGraphql } from 'react-icons/si';
 import { IoNotifications } from 'react-icons/io5';
 
-type ViewType = 'explorer' | 'graph' | 'analytics';
+type ViewType = 'explorer' | 'graph' | 'sessions' | 'analytics';
 
 interface HeaderProps {
   activeView: ViewType;
@@ -13,8 +15,9 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({ activeView, onViewChange }) => {
   const tabs = [
     { id: 'explorer' as ViewType, icon: HiFolder, label: 'File Explorer' },
-    { id: 'graph' as ViewType, icon: BiNetworkChart, label: 'Knowledge Graph' },
-    { id: 'analytics' as ViewType, icon: HiChartBar, label: 'Analytics' },
+    { id: 'graph' as ViewType, icon: SiGraphql, label: 'Knowledge Graph' },
+    { id: 'sessions' as ViewType, icon: GoWorkflow, label: 'Sessions' },
+    { id: 'analytics' as ViewType, icon: GiNetworkBars, label: 'Analytics' },
   ];
 
   return (

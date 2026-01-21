@@ -1,10 +1,6 @@
 use anyhow::Result;
 use rmcp::model::Content;
-use schemars::{
-    JsonSchema,
-    SchemaGenerator,
-    schema::{InstanceType, ObjectValidation, Schema, SchemaObject, SingleOrVec},
-};
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -27,13 +23,10 @@ fn default_mode() -> String {
 }
 
 fn schema_any_object(_gen: &mut SchemaGenerator) -> Schema {
-    let mut schema = SchemaObject::default();
-    schema.instance_type = Some(SingleOrVec::Single(Box::new(InstanceType::Object)));
-    schema.object = Some(Box::new(ObjectValidation {
-        additional_properties: Some(Box::new(Schema::Bool(true))),
-        ..Default::default()
-    }));
-    Schema::Object(schema)
+    json_schema!({
+        "type": "object",
+        "additionalProperties": true
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]

@@ -5,6 +5,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::path::PathBuf;
 
 use crate::services::codebase_parser::{CodebaseParser, FileLog};
@@ -101,7 +102,8 @@ pub async fn parse_codebase(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     
-    let root_path = PathBuf::from(&request.root_path);
+    let root_path = map_windows_mount(&request.root_path)
+        .unwrap_or_else(|| PathBuf::from(&request.root_path));
     if !root_path.exists() {
         tracing::error!("Path does not exist: {}", request.root_path);
         return Err(StatusCode::BAD_REQUEST);
@@ -142,7 +144,12 @@ pub async fn parse_file(
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
     
-    let file_path = PathBuf::from(&request.file_path);
+    let mut file_path = PathBuf::from(&request.file_path);
+    if !file_path.exists() {
+        if let Some(mapped) = map_windows_mount(&request.file_path) {
+            file_path = mapped;
+        }
+    }
     if !file_path.exists() {
         tracing::error!("File does not exist: {}", request.file_path);
         return Err(StatusCode::BAD_REQUEST);
@@ -462,6 +469,14 @@ fn normalize_lookup_path(path: &str) -> String {
     normalized.to_lowercase()
 }
 
+fn normalize_file_content_path(path: &str) -> String {
+    let mut normalized = path.replace('/', "\\");
+    if let Some(stripped) = normalized.strip_prefix(".\\") {
+        normalized = stripped.to_string();
+    }
+    normalized
+}
+
 fn parse_object_id(input: &str) -> Option<String> {
     let trimmed = input.trim();
     let candidate = trimmed.strip_prefix("objects:").unwrap_or(trimmed);
@@ -474,6 +489,14 @@ fn extract_basename(input: &str) -> String {
         .next()
         .unwrap_or(input)
         .to_lowercase()
+}
+
+fn extract_basename_raw(input: &str) -> String {
+    input
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or(input)
+        .to_string()
 }
 
 async fn fetch_file_log_fallback(
@@ -540,12 +563,18 @@ pub async fn get_file_content(
     Path(file_path): Path<String>,
     Query(query): Query<FileContentQuery>,
 ) -> Result<Json<FileContentResponse>, (StatusCode, Json<serde_json::Value>)> {
-    let query_str = "SELECT content, chunk_index FROM objects WHERE type = 'FileChunk' AND (file_path = $path OR file_path CONTAINS $path) ORDER BY chunk_index ASC";
+    let normalized = normalize_file_content_path(&file_path);
+    let basename = extract_basename_raw(&file_path);
+    let basename_lower = basename.to_lowercase();
+    let query_str = "SELECT content, chunk_index FROM objects WHERE type = 'FileChunk' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm OR file_path CONTAINS $basename OR file_path CONTAINS $basename_lower) ORDER BY chunk_index ASC";
     let mut response = match state
         .db
         .client
         .query(query_str)
         .bind(("path", file_path.clone()))
+        .bind(("norm", normalized.clone()))
+        .bind(("basename", basename.clone()))
+        .bind(("basename_lower", basename_lower.clone()))
         .await
     {
         Ok(response) => response,
@@ -596,6 +625,11 @@ pub async fn get_file_content(
 
 /// Resolve file path using multiple strategies
 fn resolve_file_path(file_path: &str, _state: &AppState) -> Result<PathBuf, StatusCode> {
+    if let Some(mapped) = map_windows_mount(file_path) {
+        if mapped.exists() {
+            return Ok(mapped);
+        }
+    }
     // Strategy 1: Try as absolute path
     let path = PathBuf::from(file_path);
     if path.is_absolute() && path.exists() {
@@ -635,6 +669,28 @@ fn resolve_file_path(file_path: &str, _state: &AppState) -> Result<PathBuf, Stat
     tracing::error!("Could not resolve file path: {}", file_path);
     tracing::error!("Current directory: {:?}", std::env::current_dir());
     Err(StatusCode::NOT_FOUND)
+}
+
+fn map_windows_mount(path: &str) -> Option<PathBuf> {
+    let host_root = env::var("AMP_WINDOWS_MOUNT_ROOT").unwrap_or_else(|_| "C:\\Users".to_string());
+    let container_root = env::var("AMP_WORKSPACE_MOUNT").unwrap_or_else(|_| "/workspace".to_string());
+
+    let normalized = path.strip_prefix(r"\\?\").unwrap_or(path);
+    let normalized = normalized.replace('/', "\\");
+    let host_root_norm = host_root.replace('/', "\\");
+
+    if !normalized.to_lowercase().starts_with(&host_root_norm.to_lowercase()) {
+        return None;
+    }
+
+    let rel = normalized[host_root_norm.len()..].trim_start_matches('\\');
+    let container_root = container_root.trim_end_matches('/');
+    let mapped = if rel.is_empty() {
+        container_root.to_string()
+    } else {
+        format!("{}/{}", container_root, rel.replace('\\', "/"))
+    };
+    Some(PathBuf::from(mapped))
 }
 
 // Helper functions
@@ -686,4 +742,113 @@ fn detect_language(file_path: &std::path::PathBuf) -> String {
             _ => "config".to_string(),
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeleteCodebaseRequest {
+    pub codebase_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteCodebaseResponse {
+    pub success: bool,
+    pub message: String,
+    pub deleted_counts: DeletedCounts,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeletedCounts {
+    pub objects: usize,
+    pub relationships: usize,
+    pub orphaned_edges: usize,
+}
+
+/// Delete entire codebase and all related data
+pub async fn delete_codebase(
+    State(state): State<AppState>,
+    Json(request): Json<DeleteCodebaseRequest>,
+) -> Result<Json<DeleteCodebaseResponse>, (StatusCode, Json<serde_json::Value>)> {
+    tracing::info!("Deleting codebase: {}", request.codebase_id);
+    
+    // Delete all objects associated with this codebase
+    let delete_objects_query = "DELETE FROM objects WHERE project_id = $codebase_id";
+    let objects_result = match state
+        .db
+        .client
+        .query(delete_objects_query)
+        .bind(("codebase_id", request.codebase_id.clone()))
+        .await
+    {
+        Ok(mut response) => {
+            let values = take_json_values(&mut response, 0);
+            values.len()
+        }
+        Err(err) => {
+            tracing::error!("Failed to delete objects: {}", err);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to delete objects: {}", err) })),
+            ));
+        }
+    };
+    
+    // Delete all relationships
+    let delete_relationships_query = "DELETE FROM relationships WHERE project_id = $codebase_id";
+    let relationships_result = match state
+        .db
+        .client
+        .query(delete_relationships_query)
+        .bind(("codebase_id", request.codebase_id.clone()))
+        .await
+    {
+        Ok(mut response) => {
+            let values = take_json_values(&mut response, 0);
+            values.len()
+        }
+        Err(err) => {
+            tracing::error!("Failed to delete relationships: {}", err);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to delete relationships: {}", err) })),
+            ));
+        }
+    };
+    
+    // Clean up orphaned edges (defined_in, depends_on, calls)
+    let cleanup_queries = vec![
+        "DELETE FROM defined_in WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
+        "DELETE FROM depends_on WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
+        "DELETE FROM calls WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
+    ];
+    
+    let mut orphaned_count = 0;
+    for query in cleanup_queries {
+        match state.db.client.query(query).await {
+            Ok(mut response) => {
+                let values = take_json_values(&mut response, 0);
+                orphaned_count += values.len();
+            }
+            Err(err) => {
+                tracing::warn!("Failed to clean up orphaned edges: {}", err);
+            }
+        }
+    }
+    
+    tracing::info!(
+        "Deleted codebase {}: {} objects, {} relationships, {} orphaned edges",
+        request.codebase_id,
+        objects_result,
+        relationships_result,
+        orphaned_count
+    );
+    
+    Ok(Json(DeleteCodebaseResponse {
+        success: true,
+        message: format!("Successfully deleted codebase {}", request.codebase_id),
+        deleted_counts: DeletedCounts {
+            objects: objects_result,
+            relationships: relationships_result,
+            orphaned_edges: orphaned_count,
+        },
+    }))
 }

@@ -4,7 +4,13 @@
 
 # Agentic Memory Protocol (AMP)
 
-A vendor-neutral protocol for durable, unified memory in agentic software development. AMP provides persistent, shared knowledge for AI coding agents, enabling coordination, avoiding duplication, and maintaining audit trails across sessions.
+A vendor-neutral protocol for durable, unified memory in agentic software development. AMP provides persistent, shared knowledge for AI agents, enabling seamless coordination, eliminating redundant work, and maintaining complete audit trails across sessions.
+
+**Built for the Dynamous-Kiro Hackathon**, this implementation demonstrates AMP's capabilities through a coding agent use case—but this is just the beginning. The current system showcases hybrid retrieval (vector + graph + temporal), multi-language code parsing, and real-time knowledge graph visualization, proving AMP's potential as a universal memory substrate.
+
+**Post-Hackathon Vision**: AMP will evolve into the foundational memory layer for all AI agent implementations. Our roadmap includes embeddable libraries (Python, TypeScript, Rust), distributed coordination primitives, and advanced memory techniques that ensure your agents maintain persistent context throughout their entire workflow—not just within a single session, but across the lifetime of your project.
+
+**AMP is positioning to become the standard protocol for agent memory**, providing the infrastructure that lets agents remember, reason, and collaborate at scale. 
 
 ## Status
 
@@ -49,15 +55,69 @@ npm run dev
 
 ### Using with AI Agents
 
-AMP integrates with AI agents via Model Context Protocol (MCP):
+AMP integrates with AI agents via Model Context Protocol (MCP). Choose either Docker (recommended) or local installation.
+
+#### Option 1: Docker (Recommended)
+
+Start all services with Docker Compose:
+
+```bash
+cd amp
+docker compose up
+```
+
+This starts:
+- **SurrealDB** on port 7505
+- **AMP Server** on port 8105
+- **AMP MCP Server** on port 8106 (HTTP transport)
+- **AMP UI** on port 8109
+
+Configure your AI agent to connect via HTTP/Streamable HTTP transport:
+
+**Claude Code** (`~/.claude/settings.json` or `.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "amp": {
+      "url": "http://localhost:8106/mcp"
+    }
+  }
+}
+```
+
+**Claude Desktop** (`%APPDATA%\Claude\claude_desktop_config.json` on Windows, `~/.config/Claude/claude_desktop_config.json` on Linux/Mac):
+```json
+{
+  "mcpServers": {
+    "amp": {
+      "url": "http://localhost:8106/mcp"
+    }
+  }
+}
+```
+
+**Other MCP Clients** (Cursor, Continue, etc.):
+```json
+{
+  "mcpServers": {
+    "amp": {
+      "type": "streamable-http",
+      "url": "http://localhost:8106/mcp"
+    }
+  }
+}
+```
+
+#### Option 2: Local Installation (stdio transport)
+
+Build and run locally for stdio-based communication:
 
 ```bash
 # Build MCP server
 cd amp/mcp-server
 cargo build --release
 
-# Configure Claude Desktop
-# Add to ~/.config/Claude/claude_desktop_config.json:
+# Configure Claude Desktop for stdio transport:
 {
   "mcpServers": {
     "amp": {
@@ -214,6 +274,7 @@ See [amp/mcp-server/INTEGRATION.md](amp/mcp-server/INTEGRATION.md) for complete 
 - **amp_filelog_get** - Retrieve file logs with symbols
 - **amp_filelog_update** - Update file after changes
 - **amp_file_content_get** - Fetch stored file content
+- **amp_file_path_resolve** - Resolve canonical stored file paths
 
 ### Coordination
 - **amp_lease_acquire** - Acquire resource locks
@@ -260,6 +321,14 @@ INDEX_OPENROUTER_MODEL=openai/gpt-4o-mini
 INDEX_OLLAMA_MODEL=llama3.1
 INDEX_WORKERS=4
 ```
+
+### Windows Docker Path Mapping
+
+When running `amp-server` in Docker on Windows, the compose setup mounts `C:\Users` into the container at `/workspace` (read-only). The server maps Windows paths to `/workspace/...` automatically for parsing.
+
+Override the defaults if you want a narrower mount:
+- `AMP_WINDOWS_MOUNT_ROOT` (default: `C:\Users`)
+- `AMP_WORKSPACE_MOUNT` (default: `/workspace`)
 
 ### Database Options
 
@@ -580,7 +649,7 @@ DELETE FROM calls WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT
 
 ## Contributing
 
-This project was built for the AWS Hackathon using Kiro CLI. For questions or contributions, please open an issue.
+This project was built for the Dynamous-Kiro Hackathon using Kiro CLI. For questions or contributions, please open an issue.
 
 ### Development Stats
 

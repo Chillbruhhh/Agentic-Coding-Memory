@@ -3966,3 +3966,325 @@ for (let offset = 0; offset <= center; offset++) {
 
 **Time Spent**: 20 minutes
 **Status**: ✅ Complete
+
+---
+
+## Day 10: January 21, 2026
+
+### Morning - Sessions UI Implementation (2 hours)
+**Timestamp**: 2026-01-21 09:00 - 11:00
+**Objective**: Build comprehensive Sessions UI for browsing and inspecting agent runs
+
+**Background**:
+- Users needed visibility into agent execution history
+- No way to inspect run details, status, or outputs
+- Required real-time updates for active runs
+
+**Implementation Details**:
+
+**1. Sessions Component** (1 hour):
+- Created split-view layout: run list + detail panel
+- Added run polling hook for real-time updates
+- Implemented run detail fetch with full metadata
+- Status indicators (running, completed, failed)
+
+**2. Query Optimization** (30 minutes):
+- Expanded projection to include run status and summaries
+- Excluded Run objects from codebase parsing to prevent empty project cards
+- Added filtering by status and project
+
+**3. UI Features** (30 minutes):
+- Live status updates with polling
+- Expandable run details with outputs
+- Timeline view of execution steps
+- Error display for failed runs
+
+**Files Modified**:
+- `amp/ui/src/components/Sessions.tsx` - New sessions browser component
+- `amp/ui/src/hooks/useRuns.ts` - Run polling and fetch hooks
+- `amp/server/src/handlers/runs.rs` - Enhanced query projections
+
+**Results**:
+- ✅ Real-time session monitoring
+- ✅ Historical run inspection
+- ✅ Clean separation of runs from codebase data
+- ✅ Comprehensive run metadata display
+
+**Time Spent**: 2 hours
+**Status**: ✅ Complete
+
+---
+
+### Afternoon - Docker Development Environment (3 hours)
+**Timestamp**: 2026-01-21 13:00 - 16:00
+**Objective**: Establish robust containerized development environment with proper service orchestration
+
+**Background**:
+- Development required manual service management
+- Inconsistent database connections across environments
+- Build times were slow without caching
+- Path mapping issues between Windows host and containers
+
+**Implementation Details**:
+
+**1. Docker Compose Stack** (1 hour):
+Switched to bind-mounted services with unified stack:
+```yaml
+services:
+  surrealdb:
+    image: surrealdb/surrealdb:v2.4.0
+    ports: ["8105:8000", "8109:8000"]
+    command: start --log info --user root --pass root file:/data
+    volumes: [surrealdb-data:/data]
+  
+  amp-server:
+    build: ./server
+    working_dir: /app/amp
+    volumes:
+      - .:/app/amp
+      - cargo-cache:/usr/local/cargo
+      - target-cache:/app/amp/target
+```
+
+**2. Rust Container Configuration** (1 hour):
+- Bumped to Rust 1.85 for edition2024 support (rmcp requirement)
+- Split cargo registry/git volumes per service to prevent collisions
+- Set CARGO_HOME to avoid concurrent download issues
+- Added cargo cache volumes for faster rebuilds
+- Switched to bullseye base images for better compatibility
+
+**3. SurrealDB Configuration** (30 minutes):
+- Run as root to avoid RocksDB permission errors
+- Reduced logging to info level (prevent trace spam)
+- WebSocket connection with root credentials
+- Persistent data volume
+
+**4. Windows Path Mapping** (30 minutes):
+Mounted `C:\Users` to `/workspace` in containers:
+```yaml
+volumes:
+  - C:\Users:/workspace
+environment:
+  - AMP_WINDOWS_MOUNT_ROOT=C:\Users
+  - AMP_WORKSPACE_MOUNT=/workspace
+```
+
+Server-side path resolution:
+```rust
+fn map_windows_mount(path: &str) -> Option<PathBuf> {
+    let host_root = env::var("AMP_WINDOWS_MOUNT_ROOT")
+        .unwrap_or_else(|_| "C:\\Users".to_string());
+    let container_root = env::var("AMP_WORKSPACE_MOUNT")
+        .unwrap_or_else(|_| "/workspace".to_string());
+    // Map Windows paths to container paths
+}
+```
+
+**Technical Challenges**:
+- Cargo.lock v4 required Rust 1.82+
+- Edition2024 features required Rust 1.85+
+- Concurrent cargo operations caused registry corruption
+- RocksDB permissions required root user in container
+- Windows path separators needed normalization
+
+**Files Modified**:
+- `amp/docker-compose.yml` - Complete stack configuration
+- `amp/server/Dockerfile` - Rust 1.85 bullseye image
+- `amp/server/src/handlers/codebase.rs` - Windows path mapping
+- `README.md` - Docker setup documentation
+
+**Results**:
+- ✅ One-command development environment (`docker-compose up`)
+- ✅ Fast rebuilds with cargo caching
+- ✅ Consistent database connections
+- ✅ Windows path compatibility
+- ✅ No permission issues with data volumes
+
+**Time Spent**: 3 hours
+**Status**: ✅ Complete
+
+---
+
+### Afternoon - CLI Container Integration (1.5 hours)
+**Timestamp**: 2026-01-21 16:00 - 17:30
+**Objective**: Enable CLI to work seamlessly with containerized server
+
+**Background**:
+- CLI couldn't detect containerized server
+- Manual path translation required for indexing
+- No automated container execution for CLI commands
+
+**Implementation Details**:
+
+**1. Container Detection** (30 minutes):
+Added auto-detection of running containerized AMP server:
+```rust
+fn detect_container_server() -> bool {
+    // Check if server is running in Docker
+    // Look for docker-compose services
+    // Verify connectivity
+}
+```
+
+**2. CLI Service** (45 minutes):
+Added `amp-cli` service to docker-compose:
+```yaml
+amp-cli:
+  build: ./cli
+  volumes:
+    - C:\Users:/workspace
+  environment:
+    - AMP_SERVER_URL=http://amp-server:3000
+  profiles: [tools]
+```
+
+**3. Windows Wrapper Scripts** (15 minutes):
+Created `amp.ps1` and `amp.bat` wrappers:
+```powershell
+# Run amp index via container with path mapping
+docker-compose run --rm amp-cli index $args
+```
+
+**Files Modified**:
+- `amp/docker-compose.yml` - Added amp-cli service
+- `amp/cli/src/main.rs` - Container detection logic
+- `scripts/amp.ps1` - Windows wrapper script
+- `scripts/amp.bat` - Windows batch wrapper
+
+**Results**:
+- ✅ Automatic container detection
+- ✅ Seamless CLI execution in containers
+- ✅ Consistent path handling
+- ✅ Windows-friendly wrappers
+
+**Time Spent**: 1.5 hours
+**Status**: ✅ Complete
+
+---
+
+### Evening - MCP Server Enhancements (1 hour)
+**Timestamp**: 2026-01-21 18:00 - 19:00
+**Objective**: Improve MCP server tool definitions and file path handling
+
+**Background**:
+- Schema generation failing with schemars 1.x
+- File path resolution inconsistent across tools
+- Limited project discovery capabilities
+
+**Implementation Details**:
+
+**1. Schema Helper Update** (20 minutes):
+Updated to use schemars 1.x public API:
+```rust
+// Old: private API
+schema.object_type = Some(ObjectType::default());
+
+// New: public API
+let mut schema = SchemaObject::default();
+schema.instance_type = Some(InstanceType::Object.into());
+```
+
+**2. File Path Resolution Tool** (20 minutes):
+Added `amp_file_path_resolve` MCP tool:
+- Returns canonical stored file paths
+- Handles Windows/Linux path differences
+- Supports fuzzy matching for partial paths
+
+**3. Enhanced File Content Retrieval** (20 minutes):
+Improved `amp_file_content_get`:
+- Normalized path handling with retries
+- Broader server-side matching (basename, normalized, original)
+- Better error messages for missing files
+
+**4. Project Discovery** (10 minutes):
+Enhanced `amp_list` with symbol-kind filtering:
+- Filter by FileLog, Symbol, Decision, etc.
+- Project-level aggregation
+- Improved metadata in responses
+
+**Files Modified**:
+- `amp/mcp-server/src/schema.rs` - Schemars 1.x compatibility
+- `amp/mcp-server/src/tools/file_path.rs` - New resolution tool
+- `amp/mcp-server/src/tools/file_content.rs` - Enhanced matching
+- `amp/mcp-server/src/tools/list.rs` - Symbol-kind filtering
+
+**Results**:
+- ✅ Schema generation working with schemars 1.x
+- ✅ Reliable file path resolution
+- ✅ Better file content retrieval
+- ✅ Enhanced project discovery
+
+**Time Spent**: 1 hour
+**Status**: ✅ Complete
+
+
+---
+
+### Evening - Codebase Delete Functionality (30 minutes)
+**Timestamp**: 2026-01-21 19:30 - 20:00
+**Objective**: Add ability to delete entire codebases from the UI with full cleanup of all related data
+
+**Background**:
+- Users had no way to remove indexed codebases from the system
+- Needed comprehensive deletion that removes objects, relationships, and orphaned edges
+- Required confirmation UI to prevent accidental deletions
+
+**Implementation Details**:
+
+**1. Backend Delete Endpoint** (15 minutes):
+Created `delete_codebase` handler in `amp/server/src/handlers/codebase.rs`:
+- Accepts `codebase_id` (project_id) in request body
+- Deletes all objects where `project_id` matches
+- Deletes all relationships where `project_id` matches
+- Cleans up orphaned edges in `defined_in`, `depends_on`, and `calls` tables
+- Returns deletion counts for transparency
+
+**Deletion Query Strategy**:
+```sql
+-- Delete all objects for codebase
+DELETE FROM objects WHERE project_id = $codebase_id;
+
+-- Delete all relationships
+DELETE FROM relationships WHERE project_id = $codebase_id;
+
+-- Clean up orphaned edges
+DELETE FROM defined_in WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);
+DELETE FROM depends_on WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);
+DELETE FROM calls WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);
+```
+
+**2. Frontend Delete UI** (15 minutes):
+Updated `FileExplorer.tsx` component:
+- Added trash icon button to each codebase card
+- Implemented confirmation modal with warning message
+- Shows loading state during deletion
+- Auto-refreshes codebase list after successful deletion
+- Prevents accidental clicks by stopping event propagation
+
+**Confirmation Modal Features**:
+- Red warning theme with trash icon
+- Clear warning about permanent deletion
+- Lists what will be deleted (files, symbols, relationships, embeddings)
+- Disabled state during deletion with spinner
+- Cancel button to abort
+
+**Technical Challenges**:
+- Ensuring all related data is deleted (not just objects)
+- Preventing orphaned edges that could cause query issues
+- Providing user feedback during potentially long deletions
+- Handling errors gracefully with user-friendly messages
+
+**Files Modified**:
+- `amp/server/src/handlers/codebase.rs` - Added `delete_codebase` handler with cleanup logic
+- `amp/server/src/main.rs` - Added `/codebase/delete` POST route
+- `amp/ui/src/components/FileExplorer.tsx` - Added delete button, confirmation modal, and delete logic
+
+**Results**:
+- ✅ Complete codebase deletion with full cleanup
+- ✅ Orphaned edge cleanup prevents database inconsistencies
+- ✅ User-friendly confirmation modal prevents accidents
+- ✅ Loading states provide clear feedback
+- ✅ Auto-refresh keeps UI in sync after deletion
+
+**Time Spent**: 30 minutes
+**Status**: ✅ Complete
