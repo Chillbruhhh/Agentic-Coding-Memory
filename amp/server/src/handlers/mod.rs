@@ -6,3 +6,4 @@ pub mod relationships;
 pub mod codebase;
 pub mod analytics;
 pub mod settings;
+pub mod artifacts;

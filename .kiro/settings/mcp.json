@@ -22,8 +22,12 @@
       "args": [
         "mcp-remote",
         "http://localhost:8106/mcp",
-        "allow-http"
-      ]
+        "--allow-http"
+      ],
+      "env": {
+        "MCP_TRANSPORT": "http",
+        "MCP_PORT": "8106"
+      }
     }
   }
 }

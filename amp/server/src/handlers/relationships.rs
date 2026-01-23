@@ -12,8 +12,10 @@ use crate::{models::relationships::*, surreal_json::take_json_values, AppState};
 
 #[derive(Debug, Deserialize)]
 pub struct RelationshipQuery {
-    pub source_id: Option<Uuid>,
-    pub target_id: Option<Uuid>,
+    #[serde(rename = "object_id")]
+    pub object_id: Option<String>,
+    pub source_id: Option<String>,
+    pub target_id: Option<String>,
     #[serde(rename = "type")]
     pub relation_type: Option<String>,
 }
@@ -84,8 +86,12 @@ pub async fn get_relationships(
     State(state): State<AppState>,
     Query(query): Query<RelationshipQuery>,
 ) -> Result<Json<Vec<Value>>, StatusCode> {
+    tracing::debug!(
+        "Relationship query params: object_id={:?}, source_id={:?}, target_id={:?}, type={:?}",
+        query.object_id, query.source_id, query.target_id, query.relation_type
+    );
     // Build query based on filters - use SELECT VALUE to avoid enum serialization issues
-    let mut query_str = String::from("SELECT VALUE { in: string::concat(in.id), out: string::concat(out.id), created_at: created_at } FROM [");
+    let mut query_str = String::from("SELECT VALUE { in: string::concat(in.id), out: string::concat(out.id), type: meta::tb(id), created_at: created_at } FROM [");
     
     if let Some(rel_type) = &query.relation_type {
         query_str.push_str(rel_type);
@@ -96,11 +102,14 @@ pub async fn get_relationships(
     query_str.push_str("]");
     
     let mut conditions = Vec::new();
+    if query.object_id.is_some() {
+        conditions.push("(in = type::thing('objects', $object) OR out = type::thing('objects', $object))".to_string());
+    }
     if query.source_id.is_some() {
-        conditions.push("out = type::record('objects', $source)".to_string());
+        conditions.push("out = type::thing('objects', $source)".to_string());
     }
     if query.target_id.is_some() {
-        conditions.push("in = type::record('objects', $target)".to_string());
+        conditions.push("in = type::thing('objects', $target)".to_string());
     }
     
     if !conditions.is_empty() {
@@ -111,6 +120,9 @@ pub async fn get_relationships(
     tracing::debug!("Relationship query: {}", query_str);
     
     let mut query_exec = state.db.client.query(query_str);
+    if let Some(object) = query.object_id {
+        query_exec = query_exec.bind(("object", object));
+    }
     if let Some(source) = query.source_id {
         query_exec = query_exec.bind(("source", source));
     }

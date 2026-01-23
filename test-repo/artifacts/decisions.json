@@ -1,0 +1,51 @@
+[
+  {
+    "type": "decision",
+    "title": "Use Tree-sitter for Multi-Language Parsing",
+    "status": "accepted",
+    "context": "The test repository needs to support 10+ programming languages for comprehensive parser testing. We need a reliable, performant solution that can extract symbols, functions, and dependencies across different language syntaxes.",
+    "decision": "Adopt Tree-sitter as the primary parsing engine. Tree-sitter provides battle-tested grammars for 50+ languages, incremental parsing capabilities, and a consistent query API across all languages.",
+    "consequences": "Positive: Unified parsing interface, excellent performance, active community support. Negative: Learning curve for query syntax, some languages have better grammar support than others. We'll need to maintain language-specific query files.",
+    "alternatives": [
+      "Language-specific parsers (e.g., Roslyn for C#, rustc for Rust) - rejected due to inconsistent APIs",
+      "Regex-based parsing - rejected due to unreliability with complex syntax",
+      "ANTLR - rejected due to complexity and performance concerns"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["architecture", "parsing", "tree-sitter"],
+    "linked_files": ["test-repo/python/sample.py", "test-repo/rust/sample.rs"]
+  },
+  {
+    "type": "decision",
+    "title": "Repository Pattern for User Management",
+    "status": "accepted",
+    "context": "All sample files need consistent data access patterns to demonstrate proper architecture. The repository pattern provides abstraction over data storage and enables testing.",
+    "decision": "Implement the Repository pattern across all language samples. Each sample will include a UserRepository class/struct that handles CRUD operations with in-memory storage.",
+    "consequences": "Positive: Consistent architecture across languages, easy to test, clear separation of concerns. Negative: Slight overhead for simple examples, may be overkill for demonstration purposes.",
+    "alternatives": [
+      "Direct database access - rejected due to lack of abstraction",
+      "Active Record pattern - rejected due to tight coupling",
+      "DAO pattern - similar to Repository, chose Repository for modern conventions"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["architecture", "patterns", "data-access"]
+  },
+  {
+    "type": "decision",
+    "title": "Async/Await for I/O Operations",
+    "status": "proposed",
+    "context": "Several language samples (TypeScript, Python, Rust) support asynchronous programming. We need to decide whether to demonstrate async patterns in the test repository.",
+    "decision": "Include async/await patterns in languages that support them natively. This demonstrates modern best practices and tests the parser's ability to handle async syntax.",
+    "consequences": "Positive: Shows modern patterns, tests async syntax parsing. Negative: Increases complexity, not all languages support async uniformly.",
+    "alternatives": [
+      "Synchronous only - rejected as it doesn't reflect real-world code",
+      "Callbacks - rejected as outdated pattern",
+      "Promises without async/await - rejected as less readable"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["async", "patterns", "modern-practices"]
+  }
+]

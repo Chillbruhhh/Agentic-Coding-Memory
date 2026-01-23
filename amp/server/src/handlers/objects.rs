@@ -446,16 +446,18 @@ fn extract_text_for_embedding(obj: &Value) -> Option<String> {
 
 pub async fn get_object(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
-    tracing::debug!("Get object: {}", id);
-    
-    let query = "SELECT * FROM objects WHERE id = $id";
+    let raw_id = id.trim().trim_start_matches("objects:").to_string();
+    let raw_id_for_log = raw_id.clone();
+    tracing::debug!("Get object: {}", raw_id);
+
+    let query = "SELECT VALUE { id: string::concat(id), type: type, title: title, project_id: project_id, agent_id: agent_id, run_id: run_id, tags: tags, context: context, decision: decision, consequences: consequences, alternatives: alternatives, status: status, file_path: file_path, summary: summary, symbols: symbols, dependencies: dependencies, content: content, category: category, description: description, diff_summary: diff_summary, files_changed: files_changed, linked_objects: linked_objects, linked_decisions: linked_decisions, linked_files: linked_files, memory_layers: memory_layers, created_at: created_at, updated_at: updated_at, provenance: provenance, change_history: change_history } FROM objects WHERE id = type::thing('objects', $id)";
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client
             .query(query)
-            .bind(("id", id)),
+            .bind(("id", raw_id)),
     )
     .await;
 
@@ -463,7 +465,7 @@ pub async fn get_object(
         Ok(Ok(mut response)) => {
             let mut results = take_json_values(&mut response, 0);
             if results.is_empty() {
-                tracing::warn!("Object not found: {}", id);
+                tracing::warn!("Object not found: {}", raw_id_for_log);
                 return Err(StatusCode::NOT_FOUND);
             }
             let mut json_value = results.remove(0);

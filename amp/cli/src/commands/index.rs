@@ -18,6 +18,9 @@ use std::io::IsTerminal;
 use crate::commands::index_ui::{start_index_ui, IndexUiHandle, IndexUiState};
 
 static INDEX_QUIET: AtomicBool = AtomicBool::new(false);
+const MAX_AI_LOG_CONTENT_CHARS: usize = 20000;
+const AI_LOG_CONTENT_HEAD_CHARS: usize = 12000;
+const AI_LOG_CONTENT_TAIL_CHARS: usize = 6000;
 
 macro_rules! index_log {
     ($($arg:tt)*) => {
@@ -99,13 +102,38 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         state.phase = "Scanning".to_string();
         state.status_message = format!("Project: {}", project_id);
     });
+
+    let mut warnings: Vec<String> = Vec::new();
+
+    let (worker_count, index_ai_enabled) = match get_index_settings(client).await {
+        Ok(settings) => (settings.worker_count, settings.ai_enabled),
+        Err(e) => {
+            warnings.push(format!("Failed to load index settings: {}", e));
+            with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
+            (4, true)
+        }
+    };
+    let worker_count = worker_count.clamp(1, 32);
+    if !use_tui {
+        index_log!("Index workers: {}", worker_count);
+    }
+
+    if index_ai_enabled {
+        with_ui_state(&ui_state, use_tui, |state| {
+            state.phase = "Project log".to_string();
+            state.status_message = "Generating project AI log".to_string();
+        });
+        if let Err(e) = create_project_ai_log_and_link(root_path, &project_object_id, &project_id, client).await {
+            warnings.push(format!("Project AI log failed: {}", e));
+            with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
+        }
+    }
     
     let mut total_files = 0;
     let mut processed_files = 0;
     let mut created_symbols = 0;
     let mut created_directories = 0;
     let mut errors = Vec::new();
-    let mut warnings: Vec<String> = Vec::new();
     
     // Default exclude patterns
     let mut exclude_patterns = vec![
@@ -229,19 +257,6 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         for skip in skipped_files.iter().take(10) {
             index_log!("   {}", skip);
         }
-    }
-
-    let (worker_count, index_ai_enabled) = match get_index_settings(client).await {
-        Ok(settings) => (settings.worker_count, settings.ai_enabled),
-        Err(e) => {
-            warnings.push(format!("Failed to load index settings: {}", e));
-            with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
-            (4, true)
-        }
-    };
-    let worker_count = worker_count.clamp(1, 32);
-    if !use_tui {
-        index_log!("Index workers: {}", worker_count);
     }
 
     if index_ai_enabled && !created_dir_nodes.is_empty() {
@@ -678,6 +693,24 @@ async fn create_project_node(root_path: &Path, client: &AmpClient) -> Result<(St
     Ok((object_id, project_id))
 }
 
+async fn create_project_ai_log_and_link(
+    root_path: &Path,
+    project_object_id: &str,
+    project_id: &str,
+    client: &AmpClient,
+) -> Result<()> {
+    let project_log = create_directory_log_ai(root_path, project_object_id, project_id, client).await?;
+    let log_id = project_log.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    client.create_object(project_log).await?;
+
+    if let Some(log_id) = log_id {
+        let _ = client.create_relationship_direct(project_object_id, &log_id, "defined_in").await;
+        let _ = client.create_relationship_direct(&log_id, project_object_id, "defined_in").await;
+    }
+
+    Ok(())
+}
+
 async fn create_directory_node(dir_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
     let dir_name = dir_path.file_name()
@@ -931,7 +964,7 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
     
     let file_symbol = json!({
         "id": file_id.clone(),
-        "type": "symbol",
+        "type": "file",
         "tenant_id": "default",
         "project_id": project_id,
         "created_at": now.to_rfc3339(),
@@ -1458,11 +1491,15 @@ async fn create_file_log_object_ai(
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let content_hash = format!("sha256:{:x}", hasher.finalize());
+    let (prepared_content, was_truncated) = truncate_ai_log_content(&content);
+    if was_truncated {
+        index_log!("  Truncated AI log content for {}", file_path.display());
+    }
     let payload = serde_json::json!({
         "file_path": file_path.to_string_lossy(),
         "language": language,
         "content_hash": content_hash,
-        "content": content,
+        "content": prepared_content,
         "symbols": symbols,
         "dependencies": dependencies,
     });
@@ -1480,6 +1517,29 @@ async fn create_file_log_object_ai(
     }
 
     create_file_log_object(file_path, file_id, project_id, &[])
+}
+
+fn truncate_ai_log_content(content: &str) -> (String, bool) {
+    let length = content.chars().count();
+    if length <= MAX_AI_LOG_CONTENT_CHARS {
+        return (content.to_string(), false);
+    }
+
+    let head: String = content.chars().take(AI_LOG_CONTENT_HEAD_CHARS).collect();
+    let tail: String = content
+        .chars()
+        .rev()
+        .take(AI_LOG_CONTENT_TAIL_CHARS)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    let combined = format!(
+        "{}\n\n... [truncated for AI log generation] ...\n\n{}",
+        head, tail
+    );
+    (combined, true)
 }
 
 fn create_file_log_object_from_ai(

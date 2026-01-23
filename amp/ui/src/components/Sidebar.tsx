@@ -2,10 +2,10 @@ import React from 'react';
 import { FaFolder, FaFolderOpen } from 'react-icons/fa';
 import { GiNetworkBars } from 'react-icons/gi';
 import { GoWorkflow } from 'react-icons/go';
-import { SiGraphql } from 'react-icons/si';
+import { SiGraphql, SiInternetarchive } from 'react-icons/si';
 import { PiGearFineLight } from 'react-icons/pi';
 
-type ViewType = 'explorer' | 'graph' | 'sessions' | 'analytics' | 'settings';
+type ViewType = 'explorer' | 'graph' | 'artifacts' | 'sessions' | 'analytics' | 'settings';
 
 interface SidebarProps {
   activeView: ViewType;
@@ -16,6 +16,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeView, onViewChange }) =>
   const navItems = [
     { id: 'explorer' as ViewType, icon: FaFolder, openIcon: FaFolderOpen, label: 'File Explorer' },
     { id: 'graph' as ViewType, icon: SiGraphql, label: 'Knowledge Graph' },
+    { id: 'artifacts' as ViewType, icon: SiInternetarchive, label: 'Artifacts' },
     { id: 'sessions' as ViewType, icon: GoWorkflow, label: 'Sessions' },
     { id: 'analytics' as ViewType, icon: GiNetworkBars, label: 'Analytics' },
     { id: 'settings' as ViewType, icon: PiGearFineLight, label: 'Settings' },

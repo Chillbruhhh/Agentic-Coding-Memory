@@ -165,14 +165,17 @@ export const useCodebases = () => {
       
       console.log('Extracted objects:', objects.slice(0, 3)); // Debug first 3 objects
 
-      objects = objects.filter(obj => (obj.type || '').toLowerCase() === 'symbol');
+      objects = objects.filter(obj => {
+        const objType = (obj.type || '').toLowerCase();
+        return ['symbol', 'file', 'note', 'decision', 'changeset', 'artifact_core'].includes(objType);
+      });
 
       if (objects.length === 0) {
         throw new Error('No parsed codebases found. Run CLI indexing first.');
       }
       
       // Fetch relationships from AMP server relationships endpoint
-      const relationshipsResponse = await fetch('http://localhost:8105/v1/relationships?type=defined_in', {
+      const relationshipsResponse = await fetch('http://localhost:8105/v1/relationships', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
@@ -185,14 +188,20 @@ export const useCodebases = () => {
         console.log('Fetched relationships:', relationships.length, relationships.slice(0, 3)); // Debug log
         
         relationshipData = relationships.map((rel: any) => {
-          // Extract UUIDs from "objects:⟨uuid⟩" format
-          const inId = rel.in?.replace(/^objects:⟨|⟩$/g, '') || rel.in;
-          const outId = rel.out?.replace(/^objects:⟨|⟩$/g, '') || rel.out;
+          const normalizeId = (value?: string) => {
+            if (!value) return value;
+            return value
+              .replace(/^objects:/, '')
+              .replace(/[⟨⟩]/g, '');
+          };
+
+          const inId = normalizeId(rel.in);
+          const outId = normalizeId(rel.out);
           console.log('Extracted relationship IDs:', inId, '->', outId); // Debug log
           return {
             in: inId,
             out: outId,
-            relation_type: 'defined_in'
+            relation_type: rel.type || rel.relation_type || 'defined_in'
           };
         }).filter((rel: any) => rel.in && rel.out);
       } else {
@@ -203,9 +212,14 @@ export const useCodebases = () => {
       setObjects(objects);
       console.log(`Found ${objects.length} objects and ${relationshipData.length} relationships`); // Debug log
 
-      // Group objects by project_id to create codebases
+      const codebaseObjects = objects.filter((obj: any) => {
+        const objType = (obj.type || '').toLowerCase();
+        return objType === 'symbol' || objType === 'file';
+      });
+
+      // Group codebase objects by project_id to create codebases
       const projectGroups: Record<string, any[]> = {};
-      objects.forEach((obj: any) => {
+      codebaseObjects.forEach((obj: any) => {
         if (!projectGroups[obj.project_id]) {
           projectGroups[obj.project_id] = [];
         }
@@ -394,3 +408,4 @@ export const useCodebases = () => {
     refetch
   };
 };
+

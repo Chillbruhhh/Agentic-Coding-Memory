@@ -1,0 +1,76 @@
+[
+  {
+    "type": "changeset",
+    "title": "Add Python Sample with Async Support",
+    "description": "Implemented comprehensive Python sample demonstrating dataclasses, type hints, async functions, and the repository pattern. This file serves as a reference for Python symbol extraction testing.",
+    "diff_summary": "+75 lines\n\nAdded:\n- User dataclass with type hints\n- DatabaseConnection class with context manager support\n- Async fetch_user_data function\n- calculate_fibonacci recursive function\n- process_data with filter support\n- main() entry point with example usage\n\nImports:\n- typing (List, Dict, Optional)\n- dataclasses (@dataclass)\n- Standard library (os, sys)",
+    "files_changed": [
+      "test-repo/python/sample.py"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["python", "implementation", "async"],
+    "linked_decisions": []
+  },
+  {
+    "type": "changeset",
+    "title": "Implement Rust Sample with Trait System",
+    "description": "Created Rust sample showcasing advanced language features including traits, impl blocks, Arc/Mutex for concurrency, and comprehensive error handling with Result types.",
+    "diff_summary": "+180 lines\n\nAdded:\n- User, UserRepository structs\n- Status, Error enums\n- Repository<T>, Validator traits\n- Multiple impl blocks for trait implementations\n- Async function with Tokio\n- Generic find_first function\n- Macro definition (log_info!)\n- Unit tests\n\nDependencies:\n- std::collections::HashMap\n- std::sync::{Arc, Mutex}\n- std::fmt",
+    "files_changed": [
+      "test-repo/rust/sample.rs"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["rust", "traits", "concurrency"],
+    "linked_decisions": []
+  },
+  {
+    "type": "changeset",
+    "title": "Add TypeScript Sample with Generics",
+    "description": "Implemented TypeScript sample featuring interfaces, generic classes, abstract classes, and modern async patterns. Demonstrates type system capabilities and ES6+ features.",
+    "diff_summary": "+120 lines\n\nAdded:\n- User interface with type aliases\n- Repository<T> generic interface\n- InMemoryRepository<T> generic class\n- BaseService abstract class\n- UserService concrete implementation\n- Utility functions (validateEmail, formatDate)\n- Higher-order function (createLogger)\n- Async generator (fetchUsers)\n- Namespace (Utils)\n\nImports:\n- EventEmitter from 'events'\n- fs module",
+    "files_changed": [
+      "test-repo/typescript/sample.ts"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["typescript", "generics", "interfaces"],
+    "linked_decisions": []
+  },
+  {
+    "type": "changeset",
+    "title": "Create Multi-Language Test Repository",
+    "description": "Established comprehensive test repository with 10 programming languages to validate parser performance and accuracy. Each language sample follows consistent architecture patterns while demonstrating language-specific features.",
+    "diff_summary": "+1,500 lines across 10 files\n\nLanguages Added:\n- Python (75 LOC)\n- TypeScript (120 LOC)\n- JavaScript (140 LOC)\n- Rust (180 LOC)\n- Go (160 LOC)\n- C# (200 LOC)\n- Java (190 LOC)\n- C (220 LOC)\n- C++ (210 LOC)\n- Ruby (180 LOC)\n\nCommon Patterns:\n- User model/struct\n- Repository implementation\n- Service layer\n- Utility functions\n- Example usage\n\nExpected Symbols: ~200 total",
+    "files_changed": [
+      "test-repo/python/sample.py",
+      "test-repo/typescript/sample.ts",
+      "test-repo/javascript/sample.js",
+      "test-repo/rust/sample.rs",
+      "test-repo/go/sample.go",
+      "test-repo/csharp/Sample.cs",
+      "test-repo/java/Sample.java",
+      "test-repo/c/sample.c",
+      "test-repo/cpp/sample.cpp",
+      "test-repo/ruby/sample.rb"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["test-repo", "multi-language", "setup"],
+    "linked_decisions": ["Use Tree-sitter for Multi-Language Parsing", "Repository Pattern for User Management"]
+  },
+  {
+    "type": "changeset",
+    "title": "Add Test Automation Script",
+    "description": "Created PowerShell automation script to validate parser functionality across all languages. Script counts files, builds server, runs tests, and provides usage instructions.",
+    "diff_summary": "+80 lines\n\nAdded:\n- File counting by language extension\n- Cargo build automation\n- Test execution with output capture\n- Usage instructions\n- Error handling\n\nFeatures:\n- Automatic language detection\n- Build status reporting\n- Test result summary\n- Next steps guidance",
+    "files_changed": [
+      "scripts/test-parser.ps1"
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["automation", "testing", "powershell"],
+    "linked_decisions": []
+  }
+]

@@ -2,7 +2,7 @@
 export interface AmpObject {
   id: string;
   type: string;
-  kind: string;
+  kind?: string;
   name: string;
   path: string;
   language: string;
@@ -49,6 +49,10 @@ export const getNodeSize = (kind: string): number => {
     case 'interface': return 10;
     case 'file': return 15;
     case 'directory': return 20;
+    case 'note': return 9;
+    case 'decision': return 11;
+    case 'changeset': return 10;
+    case 'artifact_core': return 14;
     default: return 5;
   }
 };
@@ -63,6 +67,10 @@ export const getNodeColor = (kind: string): string => {
     case 'interface': return '#8b5cf6'; // Purple
     case 'file': return '#6b7280'; // Gray
     case 'directory': return '#4b5563'; // Dark gray
+    case 'note': return '#6366f1'; // Indigo
+    case 'decision': return '#7c3aed'; // Violet
+    case 'changeset': return '#8b5cf6'; // Purple
+    case 'artifact_core': return '#4f46e5'; // Indigo (core)
     default: return '#64748b'; // Slate
   }
 };
@@ -74,19 +82,23 @@ export const transformAmpToGraph = (
 ): GraphData => {
   // Filter for code symbols AND files/projects to show the full hierarchy
   const codeSymbolKinds = ['function', 'class', 'method', 'variable', 'interface'];
-  const allowedTypes = ['symbol', 'Symbol']; // Support both cases
-  const allowedKinds = [...codeSymbolKinds, 'file', 'project', 'directory'];
+  const allowedTypes = ['symbol', 'Symbol', 'file', 'File', 'note', 'decision', 'changeset', 'artifact_core'];
+  const allowedKinds = [...codeSymbolKinds, 'file', 'project', 'directory', 'note', 'decision', 'changeset', 'artifact_core'];
   
   const nodes: GraphNode[] = objects
-    .filter(obj => allowedTypes.includes(obj.type) && allowedKinds.includes(obj.kind))
+    .filter(obj => {
+      const kind = (obj.kind || obj.type || '').toLowerCase();
+      const type = (obj.type || '').toLowerCase();
+      return allowedTypes.includes(type) && allowedKinds.includes(kind);
+    })
     .map(obj => ({
       id: obj.id.replace(/[⟨⟩]/g, ''), // Remove brackets to match relationship format
-      name: obj.name,
-      kind: obj.kind,
+      name: obj.name || (obj as any).title || (obj.kind || obj.type || 'artifact'),
+      kind: (obj.kind || obj.type) as string,
       path: obj.path,
       language: obj.language,
-      val: getNodeSize(obj.kind),
-      color: getNodeColor(obj.kind)
+      val: getNodeSize((obj.kind || obj.type) as string),
+      color: getNodeColor((obj.kind || obj.type) as string)
     }));
 
   const links: GraphLink[] = relationships

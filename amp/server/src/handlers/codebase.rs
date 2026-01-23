@@ -520,7 +520,7 @@ async fn fetch_file_log_fallback(
         }
     };
 
-    let mut values = take_json_values(&mut response, 0);
+    let values = take_json_values(&mut response, 0);
     if values.is_empty() {
         return Ok(values);
     }
@@ -769,7 +769,42 @@ pub async fn delete_codebase(
     Json(request): Json<DeleteCodebaseRequest>,
 ) -> Result<Json<DeleteCodebaseResponse>, (StatusCode, Json<serde_json::Value>)> {
     tracing::info!("Deleting codebase: {}", request.codebase_id);
-    
+
+    // Delete edges for this codebase only, using the project_id filter.
+    let relationship_tables = [
+        "defined_in",
+        "depends_on",
+        "calls",
+        "justified_by",
+        "modifies",
+        "implements",
+        "produced",
+        "relationships",
+    ];
+
+    let mut relationships_result = 0;
+    for table in relationship_tables {
+        let query = format!(
+            "DELETE FROM {} WHERE in IN (SELECT id FROM objects WHERE project_id = $codebase_id) OR out IN (SELECT id FROM objects WHERE project_id = $codebase_id)",
+            table
+        );
+        match state
+            .db
+            .client
+            .query(query)
+            .bind(("codebase_id", request.codebase_id.clone()))
+            .await
+        {
+            Ok(mut response) => {
+                let values = take_json_values(&mut response, 0);
+                relationships_result += values.len();
+            }
+            Err(err) => {
+                tracing::warn!("Failed to delete relationships from {}: {}", table, err);
+            }
+        }
+    }
+
     // Delete all objects associated with this codebase
     let delete_objects_query = "DELETE FROM objects WHERE project_id = $codebase_id";
     let objects_result = match state
@@ -792,54 +827,11 @@ pub async fn delete_codebase(
         }
     };
     
-    // Delete all relationships
-    let delete_relationships_query = "DELETE FROM relationships WHERE project_id = $codebase_id";
-    let relationships_result = match state
-        .db
-        .client
-        .query(delete_relationships_query)
-        .bind(("codebase_id", request.codebase_id.clone()))
-        .await
-    {
-        Ok(mut response) => {
-            let values = take_json_values(&mut response, 0);
-            values.len()
-        }
-        Err(err) => {
-            tracing::error!("Failed to delete relationships: {}", err);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "error": format!("Failed to delete relationships: {}", err) })),
-            ));
-        }
-    };
-    
-    // Clean up orphaned edges (defined_in, depends_on, calls)
-    let cleanup_queries = vec![
-        "DELETE FROM defined_in WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
-        "DELETE FROM depends_on WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
-        "DELETE FROM calls WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects)",
-    ];
-    
-    let mut orphaned_count = 0;
-    for query in cleanup_queries {
-        match state.db.client.query(query).await {
-            Ok(mut response) => {
-                let values = take_json_values(&mut response, 0);
-                orphaned_count += values.len();
-            }
-            Err(err) => {
-                tracing::warn!("Failed to clean up orphaned edges: {}", err);
-            }
-        }
-    }
-    
     tracing::info!(
-        "Deleted codebase {}: {} objects, {} relationships, {} orphaned edges",
+        "Deleted codebase {}: {} objects, {} relationships",
         request.codebase_id,
         objects_result,
-        relationships_result,
-        orphaned_count
+        relationships_result
     );
     
     Ok(Json(DeleteCodebaseResponse {
@@ -848,7 +840,7 @@ pub async fn delete_codebase(
         deleted_counts: DeletedCounts {
             objects: objects_result,
             relationships: relationships_result,
-            orphaned_edges: orphaned_count,
+            orphaned_edges: 0,
         },
     }))
 }

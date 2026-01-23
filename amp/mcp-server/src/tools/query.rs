@@ -203,7 +203,7 @@ pub async fn handle_amp_trace(
     input: AmpTraceInput,
 ) -> Result<Vec<Content>> {
     let params = serde_json::json!({
-        "from_id": input.object_id,
+        "object_id": input.object_id,
         "depth": input.depth.min(2)  // Limit depth to prevent massive responses
     });
 
@@ -218,17 +218,35 @@ pub async fn handle_amp_trace(
 fn summarize_trace_results(result: &Value, object_id: &str, depth: i32) -> Result<String> {
     let mut summary = format!("Trace for object: {} (depth: {})\n\n", object_id, depth);
     
-    if let Some(relationships) = result.get("relationships").and_then(|r| r.as_array()) {
+    let relationships = if let Some(array) = result.as_array() {
+        Some(array)
+    } else {
+        result.get("relationships").and_then(|r| r.as_array())
+    };
+
+    if let Some(relationships) = relationships {
         summary.push_str(&format!("Found {} relationships:\n\n", relationships.len()));
         
         for (i, rel) in relationships.iter().take(10).enumerate() {
             let rel_type = rel.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-            let from_id = rel.get("from").and_then(|f| f.as_str()).unwrap_or("unknown");
-            let to_id = rel.get("to").and_then(|t| t.as_str()).unwrap_or("unknown");
+            let from_id = rel.get("from").and_then(|f| f.as_str())
+                .or_else(|| rel.get("in").and_then(|f| f.as_str()))
+                .unwrap_or("unknown");
+            let to_id = rel.get("to").and_then(|t| t.as_str())
+                .or_else(|| rel.get("out").and_then(|t| t.as_str()))
+                .unwrap_or("unknown");
+            let clean_from = from_id
+                .trim_start_matches("objects:")
+                .trim_matches('⟨')
+                .trim_matches('⟩');
+            let clean_to = to_id
+                .trim_start_matches("objects:")
+                .trim_matches('⟨')
+                .trim_matches('⟩');
             
             summary.push_str(&format!("{}. {} -> {} ({})\n", i+1, 
-                &from_id[..8.min(from_id.len())], 
-                &to_id[..8.min(to_id.len())], 
+                &clean_from[..8.min(clean_from.len())], 
+                &clean_to[..8.min(clean_to.len())], 
                 rel_type
             ));
         }

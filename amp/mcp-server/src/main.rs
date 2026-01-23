@@ -112,6 +112,16 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
+                    name: "amp_write_artifact".into(),
+                    description: Some("Write artifact to graph, vector, and temporal layers".into()),
+                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpWriteArtifactInput)),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
                     name: "amp_write_decision".into(),
                     description: Some("Create an architectural decision record".into()),
                     input_schema: to_schema(schemars::schema_for!(tools::memory::AmpWriteDecisionInput)),
@@ -261,6 +271,12 @@ impl ServerHandler for AmpMcpHandler {
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
                 tools::memory::handle_write_decision(client, input).await.map_err(to_internal_error)?
+            }
+            "amp_write_artifact" => {
+                let input: tools::memory::AmpWriteArtifactInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::memory::handle_write_artifact(client, input).await.map_err(to_internal_error)?
             }
             "amp_write_changeset" => {
                 let input: tools::memory::AmpWriteChangesetInput =

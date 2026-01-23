@@ -129,20 +129,38 @@ pub fn start_index_ui(
 
             terminal.draw(|f| {
                 let elapsed = start_time.elapsed().as_secs_f64();
+
+                // Animation phases (looping with smooth transitions):
+                // Each phase is 10 seconds, with decode in the last 2 seconds
+                // and a 1-second blend period at the start of each new phase
                 let cycle = 20.0;
-                let phase_time = elapsed % cycle;
-                let in_amp = phase_time < 10.0;
-                let phase_pos = if in_amp { phase_time } else { phase_time - 10.0 };
+                let phase_duration = 10.0;
                 let decode_window = 2.0;
-                let decode_progress = if phase_pos >= 10.0 - decode_window {
-                    (phase_pos - (10.0 - decode_window)) / decode_window
+                let blend_window = 1.0; // Smooth blend after decode completes
+
+                let phase_time = elapsed % cycle;
+                let in_amp = phase_time < phase_duration;
+                let phase_pos = if in_amp { phase_time } else { phase_time - phase_duration };
+
+                // Calculate decode progress (0.0 = not decoding, 0.0-1.0 = decoding)
+                let decode_progress = if phase_pos >= phase_duration - decode_window {
+                    (phase_pos - (phase_duration - decode_window)) / decode_window
                 } else {
                     0.0
+                };
+
+                // Calculate blend factor for smooth transition from decode to live
+                // This smoothly fades from decode-style to live-style after transition
+                let blend_factor = if phase_pos < blend_window && phase_pos > 0.0 {
+                    phase_pos / blend_window // 0.0 -> 1.0 over blend window
+                } else {
+                    1.0 // Fully in live mode
                 };
 
                 let header_lines = build_header_lines(
                     in_amp,
                     decode_progress,
+                    blend_factor,
                     elapsed,
                     spinner_chars[spinner_index],
                     amp_fig.as_deref(),
@@ -254,6 +272,7 @@ pub fn start_index_ui(
 fn build_header_lines(
     show_amp: bool,
     decode_progress: f64,
+    blend_factor: f64,
     elapsed: f64,
     _spinner: char,
     amp_fig: Option<&str>,
@@ -274,15 +293,14 @@ fn build_header_lines(
     let phrase_block = pad_block(phrase_block, height, max_width);
     let amp_outline: Vec<String> = amp_block.iter().map(|line| outline_line(line)).collect();
     let phrase_outline: Vec<String> = phrase_block.iter().map(|line| outline_line(line)).collect();
-    let amp_solid: Vec<String> = amp_block.iter().map(|line| solidify_line(line)).collect();
-    let phrase_solid: Vec<String> = phrase_block.iter().map(|line| solidify_line(line)).collect();
+    let _amp_solid: Vec<String> = amp_block.iter().map(|line| solidify_line(line)).collect();
+    let _phrase_solid: Vec<String> = phrase_block.iter().map(|line| solidify_line(line)).collect();
 
     let mut lines = Vec::new();
     if show_amp && decode_progress > 0.0 {
-        for (idx, line) in amp_outline.iter().enumerate() {
+        for (idx, _line) in amp_outline.iter().enumerate() {
             let target = phrase_outline.get(idx).cloned().unwrap_or_default();
             lines.push(render_decode_transition_line(
-                line,
                 &amp_block[idx],
                 &target,
                 &phrase_block[idx],
@@ -293,10 +311,9 @@ fn build_header_lines(
             ));
         }
     } else if !show_amp && decode_progress > 0.0 {
-        for (idx, line) in phrase_outline.iter().enumerate() {
+        for (idx, _line) in phrase_outline.iter().enumerate() {
             let target = amp_outline.get(idx).cloned().unwrap_or_default();
             lines.push(render_decode_transition_line(
-                line,
                 &phrase_block[idx],
                 &target,
                 &amp_block[idx],
@@ -307,21 +324,23 @@ fn build_header_lines(
             ));
         }
     } else if show_amp {
-        for (idx, line) in amp_outline.iter().enumerate() {
+        for (idx, _line) in amp_outline.iter().enumerate() {
             lines.push(render_live_line(
                 &amp_block[idx],
                 elapsed,
                 idx,
                 height,
+                blend_factor,
             ));
         }
     } else {
-        for (idx, line) in phrase_outline.iter().enumerate() {
+        for (idx, _line) in phrase_outline.iter().enumerate() {
             lines.push(render_live_line(
                 &phrase_block[idx],
                 elapsed,
                 idx,
                 height,
+                blend_factor,
             ));
         }
     }
@@ -358,6 +377,7 @@ fn render_live_line(
     elapsed: f64,
     row: usize,
     height: usize,
+    blend_factor: f64,
 ) -> Line<'static> {
     let mut spans = Vec::with_capacity(line.len());
     let waterfall = waterfall_intensity(elapsed, row, height);
@@ -367,9 +387,14 @@ fn render_live_line(
             spans.push(Span::raw(" "));
             continue;
         }
+        // Wave intensity (used during decode transition)
+        let wave = wave_intensity(elapsed, idx, row as f64, 1.7);
+        // Live intensity (waterfall + twinkle)
         let twinkle = ((elapsed * 6.0 + idx as f64 * 0.4 + row as f64).sin() * 0.5 + 0.5)
             .clamp(0.0, 1.0);
-        let intensity = (0.35 + 0.5 * waterfall + 0.15 * twinkle).clamp(0.0, 1.0);
+        let live = (0.35 + 0.5 * waterfall + 0.15 * twinkle).clamp(0.0, 1.0);
+        // Smoothly blend from wave-style to live-style based on blend_factor
+        let intensity = wave * (1.0 - blend_factor) + live * blend_factor;
         let style = glow_style(intensity);
         let shine = shine_active(elapsed, idx, row, height, line.len());
         let glyph = ch;
@@ -384,20 +409,15 @@ fn render_live_line(
 }
 
 fn render_decode_transition_line(
-    from_outline: &str,
     from_text: &str,
-    to_outline: &str,
+    _to_outline: &str,
     to_text: &str,
     progress: f64,
     elapsed: f64,
     row: usize,
     height: usize,
 ) -> Line<'static> {
-    let width = from_outline
-        .len()
-        .max(to_outline.len())
-        .max(from_text.len())
-        .max(to_text.len());
+    let width = from_text.len().max(to_text.len());
     let reveal = (progress.clamp(0.0, 1.0) * (width as f64 / 2.0 + 1.0)) as usize;
     let mut spans = Vec::with_capacity(width);
     let from_text_chars: Vec<char> = from_text.chars().collect();

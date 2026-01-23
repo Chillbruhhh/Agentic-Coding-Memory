@@ -1,0 +1,399 @@
+[
+  {
+    "type": "filelog",
+    "title": "Python Sample - User Management Module",
+    "file_path": "test-repo/python/sample.py",
+    "summary": "Core Python module demonstrating dataclasses, async functions, and type hints. Contains User model with dataclass decorator, DatabaseConnection context manager, and utility functions for data processing. Primary entry point for Python parser testing.",
+    "symbols": [
+      "User",
+      "DatabaseConnection",
+      "calculate_fibonacci",
+      "process_data",
+      "fetch_user_data",
+      "main"
+    ],
+    "dependencies": [
+      "typing",
+      "dataclasses",
+      "os",
+      "sys"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T14:30:00Z",
+        "description": "Initial implementation with User dataclass and async support"
+      },
+      {
+        "timestamp": "2026-01-20T15:15:00Z",
+        "description": "Added type hints to all function signatures"
+      },
+      {
+        "timestamp": "2026-01-20T15:45:00Z",
+        "description": "Implemented DatabaseConnection context manager"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["python", "dataclass", "async", "type-hints"]
+  },
+  {
+    "type": "filelog",
+    "title": "Rust Sample - Repository Pattern Implementation",
+    "file_path": "test-repo/rust/sample.rs",
+    "summary": "Advanced Rust implementation showcasing trait system, Arc/Mutex concurrency primitives, and Result-based error handling. Implements Repository<T> trait with UserRepository concrete type. Demonstrates lifetimes, generics, and async/await patterns.",
+    "symbols": [
+      "User",
+      "UserRepository",
+      "Status",
+      "Error",
+      "Repository",
+      "Validator",
+      "find_by_id",
+      "save",
+      "validate",
+      "find_first",
+      "async_operation",
+      "log_info"
+    ],
+    "dependencies": [
+      "std::collections::HashMap",
+      "std::sync::{Arc, Mutex}",
+      "std::fmt"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T14:45:00Z",
+        "description": "Created trait definitions and basic structs"
+      },
+      {
+        "timestamp": "2026-01-20T15:30:00Z",
+        "description": "Implemented Repository trait for UserRepository"
+      },
+      {
+        "timestamp": "2026-01-20T16:00:00Z",
+        "description": "Added Arc/Mutex for thread-safe state management"
+      },
+      {
+        "timestamp": "2026-01-20T16:20:00Z",
+        "description": "Added async function and macro definition"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["rust", "traits", "concurrency", "async"]
+  },
+  {
+    "type": "filelog",
+    "title": "TypeScript Sample - Generic Repository System",
+    "file_path": "test-repo/typescript/sample.ts",
+    "summary": "TypeScript implementation featuring generic interfaces, abstract classes, and modern ES6+ patterns. Repository<T> interface with InMemoryRepository<T> implementation. Includes async generators, higher-order functions, and namespace organization.",
+    "symbols": [
+      "User",
+      "Repository",
+      "InMemoryRepository",
+      "BaseService",
+      "UserService",
+      "validateEmail",
+      "formatDate",
+      "createLogger",
+      "fetchUsers",
+      "Utils"
+    ],
+    "dependencies": [
+      "events",
+      "fs"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T15:00:00Z",
+        "description": "Defined User interface and Repository<T> generic interface"
+      },
+      {
+        "timestamp": "2026-01-20T15:45:00Z",
+        "description": "Implemented InMemoryRepository with full CRUD operations"
+      },
+      {
+        "timestamp": "2026-01-20T16:10:00Z",
+        "description": "Added abstract BaseService and concrete UserService"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["typescript", "generics", "interfaces", "abstract-classes"]
+  },
+  {
+    "type": "filelog",
+    "title": "C++ Sample - Template-Based Architecture",
+    "file_path": "test-repo/cpp/sample.cpp",
+    "summary": "C++ implementation demonstrating templates, namespaces, RAII patterns, and operator overloading. Features template class Repository<T>, smart pointers for memory management, and namespace organization. Includes move semantics and modern C++11/14 features.",
+    "symbols": [
+      "User",
+      "Repository",
+      "UserRepository",
+      "ConnectionPool",
+      "Logger",
+      "find_by_id",
+      "save",
+      "get_connection",
+      "log",
+      "operator<<"
+    ],
+    "dependencies": [
+      "iostream",
+      "memory",
+      "vector",
+      "string",
+      "map"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T16:30:00Z",
+        "description": "Created template Repository<T> class"
+      },
+      {
+        "timestamp": "2026-01-20T17:00:00Z",
+        "description": "Implemented RAII ConnectionPool with smart pointers"
+      },
+      {
+        "timestamp": "2026-01-20T17:20:00Z",
+        "description": "Added operator overloading for User output"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["cpp", "templates", "raii", "smart-pointers"]
+  },
+  {
+    "type": "filelog",
+    "title": "Go Sample - Interface-Based Design",
+    "file_path": "test-repo/go/sample.go",
+    "summary": "Go implementation showcasing interface-based architecture, goroutines, and channels. UserRepository implements Repository interface with concurrent operations. Demonstrates defer statements, error handling patterns, and Go's composition over inheritance philosophy.",
+    "symbols": [
+      "User",
+      "Repository",
+      "UserRepository",
+      "NewUserRepository",
+      "FindByID",
+      "Save",
+      "ProcessAsync",
+      "main"
+    ],
+    "dependencies": [
+      "fmt",
+      "sync",
+      "errors",
+      "time"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T16:00:00Z",
+        "description": "Defined Repository interface and User struct"
+      },
+      {
+        "timestamp": "2026-01-20T16:30:00Z",
+        "description": "Implemented UserRepository with mutex-protected map"
+      },
+      {
+        "timestamp": "2026-01-20T16:50:00Z",
+        "description": "Added goroutine-based async processing with channels"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["go", "interfaces", "goroutines", "channels"]
+  },
+  {
+    "type": "filelog",
+    "title": "Java Sample - Enterprise Patterns",
+    "file_path": "test-repo/java/Sample.java",
+    "summary": "Java implementation demonstrating enterprise patterns including abstract classes, streams API, and annotations. Features Repository interface with InMemoryUserRepository implementation. Showcases Java 8+ features like lambda expressions, Optional, and method references.",
+    "symbols": [
+      "User",
+      "Repository",
+      "InMemoryUserRepository",
+      "UserService",
+      "findById",
+      "save",
+      "findAll",
+      "processUsers",
+      "main"
+    ],
+    "dependencies": [
+      "java.util.*",
+      "java.util.stream.*",
+      "java.util.concurrent.*"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T17:00:00Z",
+        "description": "Created Repository interface and User class"
+      },
+      {
+        "timestamp": "2026-01-20T17:30:00Z",
+        "description": "Implemented InMemoryUserRepository with ConcurrentHashMap"
+      },
+      {
+        "timestamp": "2026-01-20T17:50:00Z",
+        "description": "Added UserService with Stream API operations"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["java", "streams", "optional", "enterprise"]
+  },
+  {
+    "type": "filelog",
+    "title": "C# Sample - LINQ and Async Patterns",
+    "file_path": "test-repo/csharp/Sample.cs",
+    "summary": "C# implementation featuring LINQ queries, async/await patterns, and extension methods. IRepository<T> interface with InMemoryRepository<T> generic implementation. Demonstrates properties, events, and modern C# language features.",
+    "symbols": [
+      "User",
+      "IRepository",
+      "InMemoryRepository",
+      "UserService",
+      "FindByIdAsync",
+      "SaveAsync",
+      "GetAllAsync",
+      "UserExtensions",
+      "ToDto"
+    ],
+    "dependencies": [
+      "System",
+      "System.Collections.Generic",
+      "System.Linq",
+      "System.Threading.Tasks"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T17:15:00Z",
+        "description": "Defined IRepository<T> interface and User class"
+      },
+      {
+        "timestamp": "2026-01-20T17:45:00Z",
+        "description": "Implemented InMemoryRepository<T> with async methods"
+      },
+      {
+        "timestamp": "2026-01-20T18:10:00Z",
+        "description": "Added LINQ queries and extension methods"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["csharp", "linq", "async-await", "generics"]
+  },
+  {
+    "type": "filelog",
+    "title": "Ruby Sample - Metaprogramming and Mixins",
+    "file_path": "test-repo/ruby/sample.rb",
+    "summary": "Ruby implementation showcasing metaprogramming, mixins, and blocks. User class with Repository module mixed in. Demonstrates Ruby's dynamic nature with method_missing, define_method, and module composition patterns.",
+    "symbols": [
+      "User",
+      "Repository",
+      "UserRepository",
+      "Validator",
+      "find_by_id",
+      "save",
+      "validate",
+      "method_missing",
+      "included"
+    ],
+    "dependencies": [
+      "json",
+      "time"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T17:30:00Z",
+        "description": "Created User class and Repository module"
+      },
+      {
+        "timestamp": "2026-01-20T18:00:00Z",
+        "description": "Implemented UserRepository with mixin pattern"
+      },
+      {
+        "timestamp": "2026-01-20T18:20:00Z",
+        "description": "Added metaprogramming with method_missing"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["ruby", "metaprogramming", "mixins", "blocks"]
+  },
+  {
+    "type": "filelog",
+    "title": "C Sample - Memory Management and Pointers",
+    "file_path": "test-repo/c/sample.c",
+    "summary": "C implementation demonstrating manual memory management, function pointers, and struct-based OOP patterns. User struct with repository functions using function pointers for polymorphism. Showcases malloc/free, pointer arithmetic, and callback patterns.",
+    "symbols": [
+      "User",
+      "Repository",
+      "user_create",
+      "user_destroy",
+      "repository_create",
+      "repository_destroy",
+      "repository_find_by_id",
+      "repository_save",
+      "callback_function"
+    ],
+    "dependencies": [
+      "stdio.h",
+      "stdlib.h",
+      "string.h"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T18:00:00Z",
+        "description": "Defined User struct and basic functions"
+      },
+      {
+        "timestamp": "2026-01-20T18:30:00Z",
+        "description": "Implemented Repository with function pointers"
+      },
+      {
+        "timestamp": "2026-01-20T18:50:00Z",
+        "description": "Added memory management and cleanup functions"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["c", "pointers", "memory-management", "function-pointers"]
+  },
+  {
+    "type": "filelog",
+    "title": "JavaScript Sample - ES6+ Modern Patterns",
+    "file_path": "test-repo/javascript/sample.js",
+    "summary": "JavaScript implementation featuring ES6+ syntax including classes, arrow functions, destructuring, and generators. ConnectionPool class with async/await patterns. Demonstrates CommonJS exports, promises, and modern JavaScript idioms.",
+    "symbols": [
+      "User",
+      "Repository",
+      "ConnectionPool",
+      "UserService",
+      "findById",
+      "save",
+      "getConnection",
+      "processUsers",
+      "userGenerator"
+    ],
+    "dependencies": [
+      "events",
+      "util"
+    ],
+    "change_history": [
+      {
+        "timestamp": "2026-01-20T15:30:00Z",
+        "description": "Created User class and Repository with ES6 classes"
+      },
+      {
+        "timestamp": "2026-01-20T16:00:00Z",
+        "description": "Implemented ConnectionPool with async/await"
+      },
+      {
+        "timestamp": "2026-01-20T16:25:00Z",
+        "description": "Added generator functions and CommonJS exports"
+      }
+    ],
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["javascript", "es6", "async-await", "generators"]
+  }
+]

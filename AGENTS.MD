@@ -1,3 +1,5 @@
+# Ignore ARCHON RELATED RULE IF ARCHONS NOT ACCESSIBLE
+
 # CRITICAL: ARCHON-FIRST RULE - READ THIS FIRST
   BEFORE doing ANYTHING else, when you see ANY task management scenario:
   1. STOP and check if Archon MCP server is available

@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { HiFolder, HiFolderOpen, HiChevronRight, HiChevronDown, HiSearch, HiDocumentText, HiCode, HiX } from 'react-icons/hi';
 import { IoCreateOutline } from 'react-icons/io5';
-import { BiFile, BiGitBranch, BiNetworkChart } from 'react-icons/bi';
+import { BiFile, BiGitBranch } from 'react-icons/bi';
+import { SiGraphql } from 'react-icons/si';
 import { GiTrashCan } from 'react-icons/gi';
 import { useCodebases, CodebaseProject, FileNode } from '../hooks/useCodebases';
 import { KnowledgeGraphModal } from './KnowledgeGraphModal';
@@ -273,7 +274,7 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
                     className="p-2 hover:bg-primary/20 rounded text-slate-400 hover:text-primary transition-colors"
                     title="View Knowledge Graph"
                   >
-                    <BiNetworkChart size={20} />
+                    <SiGraphql size={20} />
                   </button>
                   <button
                     onClick={(e) => {

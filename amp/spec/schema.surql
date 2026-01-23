@@ -173,3 +173,33 @@ DEFINE FIELD updated_at ON file_logs TYPE datetime DEFAULT time::now();
 DEFINE INDEX idx_file_logs_path ON file_logs COLUMNS file_path;
 DEFINE INDEX idx_file_logs_file_id ON file_logs COLUMNS file_id;
 DEFINE INDEX idx_file_logs_embedding ON file_logs COLUMNS embedding MTREE DIMENSION 1536;
+
+-- Note-specific fields (freeform agent notes/insights)
+DEFINE TABLE notes AS SELECT * FROM objects WHERE type = "note";
+DEFINE FIELD title ON notes TYPE string;
+DEFINE FIELD content ON notes TYPE string;
+DEFINE FIELD category ON notes TYPE option<string> ASSERT $value IN ["insight", "todo", "question", "warning", "reference"];
+DEFINE FIELD linked_objects ON notes TYPE option<array<string>>;
+DEFINE FIELD agent_id ON notes TYPE option<string>;
+DEFINE FIELD run_id ON notes TYPE option<string>;
+DEFINE FIELD tags ON notes TYPE option<array<string>>;
+
+-- Indexes for notes
+DEFINE INDEX idx_notes_title ON notes COLUMNS title;
+DEFINE INDEX idx_notes_category ON notes COLUMNS category;
+DEFINE INDEX idx_notes_agent ON notes COLUMNS agent_id;
+
+-- FileLogs as artifacts (view from objects table for artifact queries)
+DEFINE TABLE filelogs AS SELECT * FROM objects WHERE type = "filelog";
+DEFINE FIELD title ON filelogs TYPE string;
+DEFINE FIELD file_path ON filelogs TYPE string;
+DEFINE FIELD summary ON filelogs TYPE string;
+DEFINE FIELD symbols ON filelogs TYPE option<array<string>>;
+DEFINE FIELD dependencies ON filelogs TYPE option<array<string>>;
+DEFINE FIELD agent_id ON filelogs TYPE option<string>;
+DEFINE FIELD run_id ON filelogs TYPE option<string>;
+DEFINE FIELD tags ON filelogs TYPE option<array<string>>;
+
+-- Indexes for filelogs
+DEFINE INDEX idx_filelogs_path ON filelogs COLUMNS file_path;
+DEFINE INDEX idx_filelogs_agent ON filelogs COLUMNS agent_id;

@@ -1,0 +1,49 @@
+[
+  {
+    "type": "note",
+    "title": "Python Sample Implementation Notes",
+    "category": "insight",
+    "content": "# Python Sample Analysis\n\n## Key Features Demonstrated\n\n- **Dataclasses**: Using `@dataclass` decorator for User model\n- **Type Hints**: Full type annotations with `typing` module\n- **Async Functions**: `async def fetch_user_data()` demonstrates async patterns\n- **Context Managers**: DatabaseConnection with `__init__` and cleanup\n\n## Symbol Extraction Targets\n\n```python\n# Expected symbols:\n- User (class)\n- DatabaseConnection (class)\n- calculate_fibonacci (function)\n- process_data (function)\n- fetch_user_data (async function)\n- main (function)\n```\n\n## Testing Notes\n\nThe parser should correctly identify:\n1. Class definitions with decorators\n2. Method definitions within classes\n3. Async function signatures\n4. Type hints in function parameters\n5. Import statements (both `import` and `from...import`)\n\n## Performance Expectations\n\n- Parse time: <10ms\n- Symbol count: ~15\n- Dependency count: ~5 imports",
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["python", "implementation", "testing"],
+    "linked_files": ["test-repo/python/sample.py"]
+  },
+  {
+    "type": "note",
+    "title": "Rust Sample - Advanced Features",
+    "category": "insight",
+    "content": "# Rust Sample Deep Dive\n\n## Advanced Patterns\n\nThe Rust sample demonstrates several advanced concepts:\n\n### Trait System\n```rust\npub trait Repository<T> {\n    fn find_by_id(&self, id: UserId) -> Result<Option<T>>;\n    fn save(&self, entity: T) -> Result<T>;\n}\n```\n\n### Concurrency Primitives\n- `Arc<Mutex<T>>` for thread-safe shared state\n- `RwMutex` for read-write locking\n- Async/await with Tokio runtime\n\n### Type System Features\n- Generic constraints\n- Associated types\n- Lifetime annotations\n- Result-based error handling\n\n## Parser Challenges\n\n1. **Impl Blocks**: Must correctly associate methods with types\n2. **Trait Implementations**: Link traits to implementing types\n3. **Macros**: `#[derive(...)]` and custom macros\n4. **Lifetimes**: Parse but don't need to validate\n\n## Expected Output\n\n- Structs: User, UserRepository, Error\n- Enums: Status, Error variants\n- Traits: Repository, Validator\n- Functions: ~20 including methods\n- Impl blocks: 4-5",
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["rust", "advanced", "traits"],
+    "linked_files": ["test-repo/rust/sample.rs"]
+  },
+  {
+    "type": "note",
+    "title": "TODO: Add More Language Samples",
+    "category": "todo",
+    "content": "# Remaining Language Samples\n\n## Priority Languages\n\n- [ ] **PHP** - Web development standard\n- [ ] **Swift** - iOS/macOS development\n- [ ] **Kotlin** - Android development\n- [ ] **Scala** - JVM functional programming\n\n## Secondary Languages\n\n- [ ] **Elixir** - Erlang VM\n- [ ] **Haskell** - Pure functional\n- [ ] **Lua** - Embedded scripting\n- [ ] **Bash** - Shell scripting\n\n## Markup/Config Languages\n\n- [ ] **JSON** - Configuration\n- [ ] **YAML** - Configuration\n- [ ] **TOML** - Configuration\n- [ ] **HTML** - Web markup\n- [ ] **CSS/SCSS** - Styling\n\n## Implementation Notes\n\nEach sample should follow the same pattern:\n1. User model/struct\n2. Repository implementation\n3. Service layer\n4. Utility functions\n5. Main/example usage\n\nTarget: 200-250 lines per sample",
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["todo", "planning", "languages"]
+  },
+  {
+    "type": "note",
+    "title": "Parser Performance Benchmarks",
+    "category": "question",
+    "content": "# Performance Questions\n\n## Current Metrics\n\nNeed to establish baseline performance metrics:\n\n1. **Parse Speed**: How many files/second?\n2. **Symbol Extraction**: Symbols/second rate?\n3. **Memory Usage**: Peak memory for 10k files?\n4. **Accuracy**: Symbol detection rate?\n\n## Test Scenarios\n\n### Small Codebase (test-repo)\n- 10 files\n- ~1,500 LOC total\n- Expected: <1 second total parse time\n\n### Medium Codebase\n- 1,000 files\n- ~100k LOC\n- Expected: <60 seconds\n\n### Large Codebase\n- 10,000 files\n- ~1M LOC\n- Expected: <10 minutes\n\n## Questions to Answer\n\n- Is parallel parsing beneficial?\n- Should we cache parsed results?\n- What's the optimal batch size?\n- How does incremental parsing perform?\n\n## Action Items\n\n1. Run `test-parser.ps1` and record metrics\n2. Profile memory usage during parsing\n3. Compare against other parsing solutions\n4. Document findings in DEVLOG",
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["performance", "benchmarks", "questions"]
+  },
+  {
+    "type": "note",
+    "title": "WARNING: C++ Template Parsing Limitations",
+    "category": "warning",
+    "content": "# Known Limitation: C++ Templates\n\n## Issue\n\nTree-sitter's C++ grammar has known limitations with complex template syntax:\n\n```cpp\n// May not parse correctly:\ntemplate<typename T, typename = std::enable_if_t<std::is_integral_v<T>>>\nclass ComplexTemplate { };\n```\n\n## Workaround\n\nFor the test repository, we're using simpler template syntax:\n\n```cpp\n// This works fine:\ntemplate<typename T>\nclass SimpleTemplate { };\n```\n\n## Impact\n\n- **Symbol Extraction**: May miss some template specializations\n- **Dependency Detection**: Template dependencies might be incomplete\n- **Graph Relationships**: Template instantiations won't be tracked\n\n## Mitigation\n\n1. Keep template usage simple in test samples\n2. Document expected vs actual symbol counts\n3. Consider upgrading to Tree-sitter 0.24 (better C++ support)\n4. Add manual symbol annotations if needed\n\n## Related\n\n- See `amp/spec/multi-language-parser-plan.md` for upgrade path\n- Tree-sitter 0.24 migration tracked in roadmap",
+    "project_id": "test-repo",
+    "tenant_id": "default",
+    "tags": ["warning", "cpp", "templates", "limitations"]
+  }
+]

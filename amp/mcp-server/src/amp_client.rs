@@ -132,4 +132,12 @@ impl AmpClient {
         let data = response.json().await?;
         Ok(data)
     }
+
+    // Write artifact
+    pub async fn write_artifact(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/artifacts", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let data = response.json().await?;
+        Ok(data)
+    }
 }

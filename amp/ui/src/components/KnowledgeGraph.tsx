@@ -12,7 +12,20 @@ export const KnowledgeGraph: React.FC = () => {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [visibleTypes, setVisibleTypes] = useState<string[]>(['function', 'class', 'method', 'variable', 'interface', 'file', 'project', 'directory']);
+  const [visibleTypes, setVisibleTypes] = useState<string[]>([
+    'function',
+    'class',
+    'method',
+    'variable',
+    'interface',
+    'file',
+    'project',
+    'directory',
+    'note',
+    'decision',
+    'changeset',
+    'artifact_core'
+  ]);
   const [fileLogMarkdown, setFileLogMarkdown] = useState<string | null>(null);
   const [fileLogNotes, setFileLogNotes] = useState<string | null>(null);
   const [fileLogLoading, setFileLogLoading] = useState(false);

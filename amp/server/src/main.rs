@@ -190,6 +190,10 @@ fn api_routes() -> Router<AppState> {
         // Settings endpoints
         .route("/settings", get(handlers::settings::get_settings))
         .route("/settings", put(handlers::settings::update_settings))
+        // Artifact endpoints - unified write across all 3 memory layers
+        .route("/artifacts", post(handlers::artifacts::write_artifact))
+        .route("/artifacts", get(handlers::artifacts::list_artifacts))
+        .route("/artifacts/:id", delete(handlers::artifacts::delete_artifact))
 }
 
 async fn track_latency(
