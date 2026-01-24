@@ -1,21 +1,21 @@
 use async_trait::async_trait;
 use thiserror::Error;
 
-pub mod openai;
-pub mod ollama;
 pub mod none;
+pub mod ollama;
+pub mod openai;
 
 #[derive(Debug, Error)]
 pub enum EmbeddingError {
     #[error("HTTP request failed: {0}")]
     RequestFailed(#[from] reqwest::Error),
-    
+
     #[error("API error: {0}")]
     ApiError(String),
-    
+
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
-    
+
     #[error("Embeddings disabled")]
     Disabled,
 }

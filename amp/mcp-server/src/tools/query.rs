@@ -113,88 +113,149 @@ pub async fn handle_amp_query(
     }
 
     let result = client.query(query).await?;
-    
+
     // Summarize RRF results with scoring details
     let summary = summarize_rrf_results(&result, &input.query)?;
-    
+
     Ok(vec![Content::text(summary)])
 }
 
 fn summarize_rrf_results(result: &Value, query: &str) -> Result<String> {
     let mut summary = format!("Hybrid Query (RRF): {}\n\n", query);
-    
+
     if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
-        summary.push_str(&format!("Found {} results (ranked by Reciprocal Rank Fusion):\n\n", results.len()));
-        
+        summary.push_str(&format!(
+            "Found {} results (ranked by Reciprocal Rank Fusion):\n\n",
+            results.len()
+        ));
+
         for (i, item) in results.iter().take(5).enumerate() {
             // Server returns "score" field (mapped from hybrid's total_score)
             let total_score = item.get("score").and_then(|s| s.as_f64()).unwrap_or(0.0);
             let text_score = item.get("text_score").and_then(|s| s.as_f64());
             let vector_score = item.get("vector_score").and_then(|s| s.as_f64());
             let graph_score = item.get("graph_score").and_then(|s| s.as_f64());
-            
+
             if let Some(obj) = item.get("object") {
                 let obj_id = obj.get("id").and_then(|i| i.as_str()).unwrap_or("unknown");
                 if let Some(obj_type) = obj.get("type").and_then(|t| t.as_str()) {
                     match obj_type {
                         "symbol" => {
-                            let name = obj.get("name").and_then(|n| n.as_str()).unwrap_or("unknown");
-                            let kind = obj.get("kind").and_then(|k| k.as_str()).unwrap_or("unknown");
-                            let path = obj.get("path").and_then(|p| p.as_str()).unwrap_or("unknown");
-                            summary.push_str(&format!("{}. Symbol: {} ({}) in {}\n", i+1, name, kind, path));
+                            let name = obj
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("unknown");
+                            let kind = obj
+                                .get("kind")
+                                .and_then(|k| k.as_str())
+                                .unwrap_or("unknown");
+                            let path = obj
+                                .get("path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("unknown");
+                            summary.push_str(&format!(
+                                "{}. Symbol: {} ({}) in {}\n",
+                                i + 1,
+                                name,
+                                kind,
+                                path
+                            ));
                             summary.push_str(&format!("   id: {}\n", obj_id));
-                        },
+                        }
                         "decision" => {
-                            let title = obj.get("title").and_then(|t| t.as_str()).unwrap_or("unknown");
-                            let status = obj.get("status").and_then(|s| s.as_str()).unwrap_or("unknown");
-                            summary.push_str(&format!("{}. Decision: {} ({})\n", i+1, title, status));
+                            let title = obj
+                                .get("title")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("unknown");
+                            let status = obj
+                                .get("status")
+                                .and_then(|s| s.as_str())
+                                .unwrap_or("unknown");
+                            summary.push_str(&format!(
+                                "{}. Decision: {} ({})\n",
+                                i + 1,
+                                title,
+                                status
+                            ));
                             summary.push_str(&format!("   id: {}\n", obj_id));
-                        },
+                        }
                         "changeset" => {
-                            let title = obj.get("title").and_then(|t| t.as_str()).unwrap_or("unknown");
-                            let files = obj.get("files_changed").and_then(|f| f.as_array()).map(|arr| arr.len()).unwrap_or(0);
-                            summary.push_str(&format!("{}. ChangeSet: {} ({} files)\n", i+1, title, files));
+                            let title = obj
+                                .get("title")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("unknown");
+                            let files = obj
+                                .get("files_changed")
+                                .and_then(|f| f.as_array())
+                                .map(|arr| arr.len())
+                                .unwrap_or(0);
+                            summary.push_str(&format!(
+                                "{}. ChangeSet: {} ({} files)\n",
+                                i + 1,
+                                title,
+                                files
+                            ));
                             summary.push_str(&format!("   id: {}\n", obj_id));
-                        },
+                        }
                         "filechunk" => {
-                            let path = obj.get("file_path").and_then(|p| p.as_str()).unwrap_or("unknown");
-                            let lines = format!("{}-{}", 
+                            let path = obj
+                                .get("file_path")
+                                .and_then(|p| p.as_str())
+                                .unwrap_or("unknown");
+                            let lines = format!(
+                                "{}-{}",
                                 obj.get("start_line").and_then(|l| l.as_u64()).unwrap_or(0),
                                 obj.get("end_line").and_then(|l| l.as_u64()).unwrap_or(0)
                             );
-                            summary.push_str(&format!("{}. FileChunk: {} (lines {})\n", i+1, path, lines));
+                            summary.push_str(&format!(
+                                "{}. FileChunk: {} (lines {})\n",
+                                i + 1,
+                                path,
+                                lines
+                            ));
                             summary.push_str(&format!("   id: {}\n", obj_id));
-                        },
+                        }
                         _ => {
                             let id = obj.get("id").and_then(|i| i.as_str()).unwrap_or("unknown");
-                            summary.push_str(&format!("{}. {} ({})\n", i+1, obj_type, &id[..8.min(id.len())]));
+                            summary.push_str(&format!(
+                                "{}. {} ({})\n",
+                                i + 1,
+                                obj_type,
+                                &id[..8.min(id.len())]
+                            ));
                             summary.push_str(&format!("   id: {}\n", obj_id));
                         }
                     }
                 }
             }
-            
+
             // Add RRF scoring breakdown
             summary.push_str(&format!("   RRF Score: {:.4}", total_score));
             if text_score.is_some() || vector_score.is_some() || graph_score.is_some() {
                 summary.push_str(" (");
                 let mut parts = Vec::new();
-                if let Some(ts) = text_score { parts.push(format!("text:{:.3}", ts)); }
-                if let Some(vs) = vector_score { parts.push(format!("vector:{:.3}", vs)); }
-                if let Some(gs) = graph_score { parts.push(format!("graph:{:.3}", gs)); }
+                if let Some(ts) = text_score {
+                    parts.push(format!("text:{:.3}", ts));
+                }
+                if let Some(vs) = vector_score {
+                    parts.push(format!("vector:{:.3}", vs));
+                }
+                if let Some(gs) = graph_score {
+                    parts.push(format!("graph:{:.3}", gs));
+                }
                 summary.push_str(&parts.join(", "));
                 summary.push_str(")");
             }
             summary.push_str("\n\n");
         }
-        
+
         if results.len() > 5 {
             summary.push_str(&format!("... and {} more results\n", results.len() - 5));
         }
     } else {
         summary.push_str("No results found\n");
     }
-    
+
     Ok(summary)
 }
 
@@ -208,16 +269,16 @@ pub async fn handle_amp_trace(
     });
 
     let result = client.get_relationships(params).await?;
-    
+
     // Summarize relationships instead of returning raw JSON
     let summary = summarize_trace_results(&result, &input.object_id, input.depth)?;
-    
+
     Ok(vec![Content::text(summary)])
 }
 
 fn summarize_trace_results(result: &Value, object_id: &str, depth: i32) -> Result<String> {
     let mut summary = format!("Trace for object: {} (depth: {})\n\n", object_id, depth);
-    
+
     let relationships = if let Some(array) = result.as_array() {
         Some(array)
     } else {
@@ -226,13 +287,20 @@ fn summarize_trace_results(result: &Value, object_id: &str, depth: i32) -> Resul
 
     if let Some(relationships) = relationships {
         summary.push_str(&format!("Found {} relationships:\n\n", relationships.len()));
-        
+
         for (i, rel) in relationships.iter().take(10).enumerate() {
-            let rel_type = rel.get("type").and_then(|t| t.as_str()).unwrap_or("unknown");
-            let from_id = rel.get("from").and_then(|f| f.as_str())
+            let rel_type = rel
+                .get("type")
+                .and_then(|t| t.as_str())
+                .unwrap_or("unknown");
+            let from_id = rel
+                .get("from")
+                .and_then(|f| f.as_str())
                 .or_else(|| rel.get("in").and_then(|f| f.as_str()))
                 .unwrap_or("unknown");
-            let to_id = rel.get("to").and_then(|t| t.as_str())
+            let to_id = rel
+                .get("to")
+                .and_then(|t| t.as_str())
                 .or_else(|| rel.get("out").and_then(|t| t.as_str()))
                 .unwrap_or("unknown");
             let clean_from = from_id
@@ -243,20 +311,25 @@ fn summarize_trace_results(result: &Value, object_id: &str, depth: i32) -> Resul
                 .trim_start_matches("objects:")
                 .trim_matches('⟨')
                 .trim_matches('⟩');
-            
-            summary.push_str(&format!("{}. {} -> {} ({})\n", i+1, 
-                &clean_from[..8.min(clean_from.len())], 
-                &clean_to[..8.min(clean_to.len())], 
+
+            summary.push_str(&format!(
+                "{}. {} -> {} ({})\n",
+                i + 1,
+                &clean_from[..8.min(clean_from.len())],
+                &clean_to[..8.min(clean_to.len())],
                 rel_type
             ));
         }
-        
+
         if relationships.len() > 10 {
-            summary.push_str(&format!("\n... and {} more relationships\n", relationships.len() - 10));
+            summary.push_str(&format!(
+                "\n... and {} more relationships\n",
+                relationships.len() - 10
+            ));
         }
     } else {
         summary.push_str("No relationships found\n");
     }
-    
+
     Ok(summary)
 }

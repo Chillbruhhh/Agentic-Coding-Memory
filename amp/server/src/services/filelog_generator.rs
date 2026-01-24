@@ -19,13 +19,15 @@ impl FileLogGenerator {
     }
 
     pub fn extract_key_symbols(&self, symbols: &[Symbol]) -> Vec<String> {
-        symbols.iter()
+        symbols
+            .iter()
             .map(|s| format!("{}:{}", s.kind_str(), s.name))
             .collect()
     }
 
     pub fn extract_dependencies(&self, symbols: &[Symbol]) -> Vec<String> {
-        symbols.iter()
+        symbols
+            .iter()
             .filter_map(|s| s.documentation.as_ref())
             .flat_map(|doc| self.extract_imports_from_doc(doc))
             .collect()
@@ -36,11 +38,20 @@ impl FileLogGenerator {
             return "No symbols found".to_string();
         }
 
-        let classes = symbols.iter().filter(|s| matches!(s.kind_str(), "class")).count();
-        let functions = symbols.iter().filter(|s| matches!(s.kind_str(), "function")).count();
+        let classes = symbols
+            .iter()
+            .filter(|s| matches!(s.kind_str(), "class"))
+            .count();
+        let functions = symbols
+            .iter()
+            .filter(|s| matches!(s.kind_str(), "function"))
+            .count();
 
         if classes > 0 && functions > 0 {
-            format!("Module containing {} classes and {} functions", classes, functions)
+            format!(
+                "Module containing {} classes and {} functions",
+                classes, functions
+            )
         } else if classes > 0 {
             format!("Class definitions ({} classes)", classes)
         } else if functions > 0 {
@@ -55,7 +66,8 @@ impl FileLogGenerator {
             return "No symbols".to_string();
         }
 
-        symbols.iter()
+        symbols
+            .iter()
             .take(20)
             .map(|s| format!("- `{}` ({})", s.name, s.kind_str()))
             .collect::<Vec<_>>()

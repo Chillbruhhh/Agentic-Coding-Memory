@@ -86,11 +86,28 @@ impl AmpClient {
         let encoded = urlencoding::encode(path);
         let url = format!("{}/v1/codebase/file-log-objects/{}", self.base_url, encoded);
         let response = self.client.get(&url).send().await?;
-        if response.status().is_success() {
+
+        let status = response.status();
+
+        if status.is_success() {
             let data = response.json().await?;
             return Ok(data);
         }
 
+        // Handle 409 Conflict (ambiguous path) as a successful response with file list
+        if status.as_u16() == 409 {
+            let error_data: Value = response.json().await?;
+            // Transform the error into an informative success response
+            return Ok(serde_json::json!({
+                "status": "ambiguous",
+                "message": error_data.get("error").and_then(|v| v.as_str()).unwrap_or("Multiple files match"),
+                "input_path": error_data.get("input_path"),
+                "matching_files": error_data.get("matching_files"),
+                "hint": error_data.get("hint").and_then(|v| v.as_str()).unwrap_or("Please use a more specific path (e.g., include parent directory)")
+            }));
+        }
+
+        // Only fall back for other errors (404, 500, etc.)
         let fallback_url = format!("{}/v1/codebase/file-logs/{}", self.base_url, encoded);
         let response = self.client.get(&fallback_url).send().await?;
         let data = response.json().await?;
@@ -113,6 +130,20 @@ impl AmpClient {
             url = format!("{}?max_chars={}", url, limit);
         }
         let response = self.client.get(&url).send().await?;
+        let status = response.status();
+
+        // Handle 409 Conflict (ambiguous path) as a successful response with file list
+        if status.as_u16() == 409 {
+            let error_data: Value = response.json().await?;
+            return Ok(serde_json::json!({
+                "status": "ambiguous",
+                "message": error_data.get("error").and_then(|v| v.as_str()).unwrap_or("Multiple files match"),
+                "input_path": error_data.get("input_path"),
+                "matching_files": error_data.get("matching_files"),
+                "hint": error_data.get("hint").and_then(|v| v.as_str()).unwrap_or("Please use a more specific path (e.g., include parent directory)")
+            }));
+        }
+
         let data = response.json().await?;
         Ok(data)
     }
@@ -137,6 +168,98 @@ impl AmpClient {
     pub async fn write_artifact(&self, payload: Value) -> Result<Value> {
         let url = format!("{}/v1/artifacts", self.base_url);
         let response = self.client.post(&url).json(&payload).send().await?;
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    // Cache get pack
+    pub async fn cache_get_pack(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/cache/pack", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    // Cache write items
+    pub async fn cache_write_items(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/cache/write", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    // File sync - synchronize file state across all memory layers
+    pub async fn file_sync(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/codebase/sync", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        let status = response.status();
+
+        if status.is_success() {
+            let data = response.json().await?;
+            return Ok(data);
+        }
+
+        // Handle 409 Conflict (ambiguous path) as a successful response with file list
+        if status.as_u16() == 409 {
+            let error_data: Value = response.json().await?;
+            return Ok(serde_json::json!({
+                "status": "ambiguous",
+                "message": error_data.get("error").and_then(|v| v.as_str()).unwrap_or("Multiple files match"),
+                "input_path": error_data.get("input_path"),
+                "matching_files": error_data.get("matching_files"),
+                "hint": error_data.get("hint").and_then(|v| v.as_str()).unwrap_or("Please use a more specific path (e.g., include parent directory)")
+            }));
+        }
+
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("file_sync failed ({}): {}", status, body);
+    }
+
+    // Cache block operations for episodic memory
+    pub async fn cache_block_write(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/cache/block/write", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("cache_block_write failed ({}): {}", status, body);
+        }
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    pub async fn cache_block_compact(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/cache/block/compact", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("cache_block_compact failed ({}): {}", status, body);
+        }
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    pub async fn cache_block_search(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/cache/block/search", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("cache_block_search failed ({}): {}", status, body);
+        }
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    pub async fn cache_block_get(&self, block_id: &str) -> Result<Value> {
+        let url = format!("{}/v1/cache/block/{}", self.base_url, block_id);
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("cache_block_get failed ({}): {}", status, body);
+        }
         let data = response.json().await?;
         Ok(data)
     }

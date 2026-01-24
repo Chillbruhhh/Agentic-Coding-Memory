@@ -4896,3 +4896,585 @@ Codebase Cards: SiGraphql (react-icons/si) ✓
 - Major Features: Test artifacts suite, artifact import/deletion system, UI icon consistency
 - Bug Fixes: Port configuration, encoding issues, SurrealDB ID normalization, file path resolution
 - Status: All features complete and functional
+
+---
+
+## Day 12: January 23, 2026
+
+### Morning - AMP Skills Documentation System (1.5 hours)
+**Timestamp**: 2026-01-23 09:00 - 10:30
+**Objective**: Create comprehensive skill documentation for AI agents using AMP tools with progressive disclosure pattern
+
+**Background**:
+- AI agents need clear guidance on when and how to use AMP tools
+- Cache vs artifacts distinction causing confusion
+- Need structured documentation that scales without overwhelming context
+- Progressive disclosure allows agents to load only relevant sections
+
+**Implementation Details**:
+
+**1. Skill Structure** (30 minutes):
+Created hierarchical documentation system:
+```
+amp/SKILLS/amp-core/
+├── SKILL.md                          # Entry point with navigation
+├── references/
+│   ├── tool-map.md                   # Tool intent mapping
+│   ├── workflows.md                  # Common patterns
+│   ├── cache-policy.md               # Short-term memory rules
+│   ├── artifact-guidelines.md        # Long-term memory rules
+│   └── examples.md                   # Concrete usage examples
+```
+
+**2. Cache vs Artifacts Guidance** (40 minutes):
+Documented clear distinction:
+- **Cache**: Short-term working memory (current session, task scope)
+- **Artifacts**: Long-term project memory (decisions, file logs, changesets)
+- When to use each based on persistence needs
+- Scope consistency rules to prevent cache misses
+
+**Cache Policy**:
+```
+✓ Use cache for: Current task context, active file edits, session state
+✗ Don't use cache for: Architectural decisions, permanent file documentation
+```
+
+**3. Tool Usage Patterns** (20 minutes):
+Documented recommended workflows:
+- Startup: Read cache for project/task scope
+- During work: Query artifacts for historical context
+- Post-edit: Write cache with updated state
+- Decisions: Write artifacts for permanent record
+
+**Files Created**:
+- `amp/SKILLS/amp-core/SKILL.md` - Main entry point with overview
+- `amp/SKILLS/amp-core/references/tool-map.md` - Tool selection guide
+- `amp/SKILLS/amp-core/references/workflows.md` - Pattern library
+- `amp/SKILLS/amp-core/references/cache-policy.md` - Memory management rules
+
+**Results**:
+- ✅ Progressive disclosure documentation structure
+- ✅ Clear cache vs artifacts distinction
+- ✅ Workflow patterns for common scenarios
+- ✅ Reduced context load for AI agents
+
+**Time Spent**: 1.5 hours
+**Status**: ✅ Complete
+
+---
+
+### Mid-Morning - Indexer Improvements (1 hour)
+**Timestamp**: 2026-01-23 10:30 - 11:30
+**Objective**: Enhance codebase indexer with better exclusion patterns and gitignore support
+
+**Background**:
+- Indexer including library folders causing noise
+- No respect for `.gitignore` patterns
+- Need configurable gitignore behavior for different workflows
+
+**Implementation Details**:
+
+**1. Library Folder Exclusion** (10 minutes):
+Extended default exclude patterns:
+```rust
+// Added to default excludes
+"lib", "Lib", "libs"  // Common library folders
+```
+
+Prevents indexing of:
+- Third-party libraries
+- Compiled dependencies
+- Binary artifacts
+
+**2. Gitignore Integration** (50 minutes):
+Added configurable gitignore support:
+- New setting: `indexRespectGitignore` (default: true)
+- Uses `ignore` crate for proper gitignore parsing
+- Respects subdirectory `.gitignore` files
+- Environment variable: `INDEX_RESPECT_GITIGNORE`
+
+**Implementation**:
+```rust
+// Load gitignore patterns
+let mut builder = WalkBuilder::new(&root_path);
+if respect_gitignore {
+    builder.git_ignore(true);
+}
+
+// Apply during traversal
+for entry in builder.build() {
+    // Automatically skips gitignored files
+}
+```
+
+**UI Integration**:
+- Added toggle in Settings > Server tab
+- Checkbox: "Respect .gitignore during indexing"
+- Persists to server settings
+
+**Technical Challenges**:
+- Ensuring gitignore patterns apply to nested directories
+- Balancing performance with pattern matching
+- Handling edge cases (missing gitignore, invalid patterns)
+
+**Files Modified**:
+- `amp/cli/src/commands/index.rs` - Added lib/libs excludes, gitignore matcher
+- `amp/cli/Cargo.toml` - Added `ignore = "0.4"` dependency
+- `amp/server/src/models/settings.rs` - Added `indexRespectGitignore` field
+- `amp/server/src/services/settings.rs` - Environment variable loading
+- `amp/ui/src/components/Settings.tsx` - UI toggle control
+
+**Results**:
+- ✅ Cleaner indexing without library noise
+- ✅ Configurable gitignore respect
+- ✅ Proper subdirectory gitignore handling
+- ✅ UI control for indexing behavior
+
+**Time Spent**: 1 hour
+**Status**: ✅ Complete
+
+---
+
+### Afternoon - Directory Hierarchy & Graph Visualization (2 hours)
+**Timestamp**: 2026-01-23 13:00 - 15:00
+**Objective**: Implement proper directory hierarchy in knowledge graph with parent-child relationships
+
+**Background**:
+- Files and directories appearing as flat list in graph
+- No visual hierarchy showing project structure
+- Directory relationships not captured during indexing
+- Need to preserve folder structure for navigation
+
+**Implementation Details**:
+
+**1. Directory Chain Creation** (1 hour):
+Implemented hierarchical directory indexing:
+```rust
+// Create directory chain for nested paths
+// Example: src/components/ui/Button.tsx
+// Creates: src -> src/components -> src/components/ui
+
+let mut current_path = PathBuf::new();
+for component in path.components() {
+    current_path.push(component);
+    
+    // Create directory node
+    let dir_id = create_directory_node(&current_path);
+    
+    // Link to parent directory
+    if let Some(parent_id) = parent_dir_id {
+        create_relationship(parent_id, "contains", dir_id);
+    }
+    
+    parent_dir_id = Some(dir_id);
+}
+```
+
+**Relationship Types**:
+- `contains`: Directory contains subdirectory or file
+- `defined_in`: File defined in directory
+
+**2. Parallel Processing Fix** (30 minutes):
+Fixed directory index sharing across async tasks:
+```rust
+// Wrap directory index in Arc for thread-safe sharing
+let dir_index = Arc::new(Mutex::new(HashMap::new()));
+
+// Clone Arc for each async task
+let dir_index_clone = Arc::clone(&dir_index);
+tokio::spawn(async move {
+    let mut index = dir_index_clone.lock().await;
+    // Use shared index
+});
+```
+
+**3. Path Canonicalization** (30 minutes):
+Store absolute paths for reliable resolution:
+- Canonicalize index root on startup
+- Store absolute paths in project nodes
+- Enables relative path resolution later
+- Handles Windows extended path prefix (`\\?\`)
+
+**4. Graph Color Improvements**:
+Enhanced visual distinction:
+- Project nodes: Bright red (`#ef4444`)
+- Directory nodes: Blue-gray (`#64748b`)
+- File nodes: Slate (`#94a3b8`)
+- Better contrast for hierarchy visualization
+
+**Technical Challenges**:
+- Ensuring directory nodes created before file nodes
+- Sharing mutable state across parallel tasks
+- Handling Windows vs Linux path separators
+- Preventing duplicate directory nodes
+
+**Files Modified**:
+- `amp/cli/src/commands/index.rs` - Directory chain creation, Arc-wrapped index, path canonicalization
+- `amp/ui/src/utils/graphDataAdapter.ts` - Project node color (bright red)
+- `amp/ui/src/utils/graphTheme.ts` - Directory/file color palette
+
+**Results**:
+- ✅ Full directory hierarchy in graph
+- ✅ Parent-child relationships preserved
+- ✅ Thread-safe parallel indexing
+- ✅ Improved visual hierarchy with colors
+- ✅ Absolute path storage for resolution
+
+**Time Spent**: 2 hours
+**Status**: ✅ Complete
+
+---
+
+### Late Afternoon - File Path Resolution System (1.5 hours)
+**Timestamp**: 2026-01-23 15:00 - 16:30
+**Objective**: Enable server to resolve relative file paths against indexed project roots
+
+**Background**:
+- Agents providing relative paths (e.g., `src/main.rs`)
+- Server unable to locate files without absolute paths
+- Need to resolve against known project roots
+- File log lookup failing for project nodes
+
+**Implementation Details**:
+
+**1. Path Resolution Logic** (45 minutes):
+Implemented multi-strategy resolution:
+```rust
+// Strategy 1: Try as absolute path
+if path.is_absolute() && path.exists() {
+    return Some(path);
+}
+
+// Strategy 2: Try against each indexed project root
+for project_root in indexed_projects {
+    let candidate = project_root.join(&path);
+    if candidate.exists() {
+        return Some(candidate);
+    }
+}
+
+// Strategy 3: Return None (not found)
+None
+```
+
+**MCP Tool**: `amp_file_path_resolve`
+- Input: Relative or absolute path
+- Output: Canonical absolute path or error
+- Used by agents before file operations
+
+**2. Windows Path Normalization** (20 minutes):
+Handle Windows extended path prefix:
+```rust
+// Normalize \\?\ prefix
+let normalized = path
+    .to_string_lossy()
+    .trim_start_matches(r"\\?\")
+    .to_string();
+```
+
+**3. File Log Enhancements** (25 minutes):
+Improved file log lookup:
+- Support project ID-based lookup via `FileLog.file_id`
+- Restrict object ID lookup to FileLog type only
+- Enable project nodes to show file log panel in graph UI
+- Added type guard for project node file log rendering
+
+**4. Indexer Refinements**:
+- Exclude `amp-core` folders from default indexing
+- Update TUI progress during scanning phase
+- Remove non-AI fallback logs for cleaner output
+
+**Technical Challenges**:
+- Handling multiple project roots in workspace
+- Windows path prefix normalization
+- Distinguishing file logs from other artifacts
+- Ensuring project nodes can display file information
+
+**Files Modified**:
+- `amp/server/src/handlers/codebase.rs` - Path resolution against project roots
+- `amp/cli/src/commands/index.rs` - Canonicalize root, exclude amp-core, TUI updates
+- `amp/ui/src/components/KnowledgeGraph.tsx` - Project node file log panel with type guard
+- `amp/mcp-server/src/tools/` - Added `amp_file_path_resolve` tool
+
+**Results**:
+- ✅ Relative path resolution working
+- ✅ Multi-project workspace support
+- ✅ Windows path compatibility
+- ✅ Project nodes show file logs
+- ✅ Cleaner indexer output
+
+**Time Spent**: 1.5 hours
+**Status**: ✅ Complete
+
+---
+
+### Evening - Skills Documentation Refinement (30 minutes)
+**Timestamp**: 2026-01-23 17:00 - 17:30
+**Objective**: Add critical cache workflow requirements to prevent agent memory issues
+
+**Background**:
+- Agents forgetting to write cache after edits
+- Missing startup cache reads causing context loss
+- Scope inconsistency leading to cache misses
+- Need explicit requirements in documentation
+
+**Implementation Details**:
+
+**1. Post-Edit Cache Requirement** (15 minutes):
+Added mandatory cache write after file modifications:
+```typescript
+// REQUIRED after any file edit
+amp_cache_write({
+  scope: "project:my-app",
+  key: "current-task",
+  content: {
+    task: "Implement auth",
+    files_modified: ["src/auth.ts"],
+    next_steps: ["Add tests", "Update docs"]
+  }
+})
+```
+
+**2. Startup Cache Requirement** (10 minutes):
+Added mandatory cache read at session start:
+```typescript
+// REQUIRED at conversation start
+amp_cache_read({
+  scope: "project:my-app",
+  key: "current-task"
+})
+```
+
+**3. Scope Consistency Rule** (5 minutes):
+Documented scope format requirements:
+- Always use same scope format: `project:<name>`
+- Never mix scope formats (prevents cache misses)
+- Include scope in all cache operations
+
+**Files Modified**:
+- `amp/SKILLS/amp-core/SKILL.md` - Added post-edit and startup requirements
+- `amp/SKILLS/amp-core/references/workflows.md` - Added artifact/query usage examples
+- `amp/SKILLS/amp-core/references/cache-policy.md` - Scope consistency rules
+
+**Results**:
+- ✅ Clear cache write requirements
+- ✅ Startup cache read pattern
+- ✅ Scope consistency enforcement
+- ✅ Reduced agent memory issues
+
+**Time Spent**: 30 minutes
+**Status**: ✅ Complete
+
+---
+
+### Late Evening - File Sync Flexible Path Matching & Ambiguity Detection (45 minutes)
+**Timestamp**: 2026-01-23 21:00 - 21:45
+**Objective**: Improve `amp_file_sync` path flexibility with safety checks for ambiguous matches
+
+**Background**:
+- Agents using relative paths like `test-repo/python/sample.py` failing to resolve
+- Need flexible path matching that works with basenames, relative paths, and absolute paths
+- Risk of silent wrong-file updates when multiple files share the same basename
+- Example: `utils.py` existing in `src/utils/`, `tests/fixtures/`, and `lib/helpers/`
+
+**Implementation Details**:
+
+**1. Tiered Path Matching** (20 minutes):
+Implemented two-tier matching strategy for safety:
+```rust
+// Tier 1: Specific matches (safe, no ambiguity possible)
+let specific_query = "SELECT file_id, file_path FROM objects
+    WHERE (type = 'FileLog' OR type = 'FileChunk')
+    AND (file_path = $path OR file_path CONTAINS $path
+         OR file_path = $norm OR file_path CONTAINS $norm)
+    LIMIT 1";
+
+// Tier 2: Basename match (with ambiguity check)
+if existing_file_id.is_none() {
+    let basename_query = "SELECT DISTINCT file_id, file_path
+        FROM objects WHERE file_path CONTAINS $basename";
+
+    // Check for multiple matches
+    let unique_paths: HashSet<String> = values.iter()
+        .filter_map(|v| v.get("file_path").and_then(|p| p.as_str()))
+        .collect();
+
+    if unique_paths.len() > 1 {
+        // Return error with all matching paths
+        return Err(StatusCode::CONFLICT, json!({
+            "error": "Ambiguous path - multiple files match",
+            "input_path": request.path,
+            "matching_files": paths_list,
+            "hint": "Please use a more specific path"
+        }));
+    }
+}
+```
+
+**Matching Priority**:
+1. Exact path match
+2. Path contains input
+3. Normalized path match (strips `\\?\` prefixes)
+4. Basename match (with ambiguity detection)
+
+**2. Ambiguity Detection** (15 minutes):
+Returns HTTP 409 Conflict with helpful error:
+```json
+{
+  "error": "Ambiguous path - multiple files match",
+  "input_path": "utils.py",
+  "matching_files": [
+    "src/utils/utils.py",
+    "tests/fixtures/utils.py",
+    "lib/helpers/utils.py"
+  ],
+  "hint": "Please use a more specific path (e.g., include parent directory)"
+}
+```
+
+Prevents silent wrong-file updates - agent must disambiguate.
+
+**3. Applied to Both Endpoints** (10 minutes):
+- `sync_file` - File sync across all memory layers
+- `get_file_log_object` - File log retrieval
+
+Both now use identical tiered matching with ambiguity detection.
+
+**4. Documentation Updates**:
+Updated skills documentation to reflect new behavior:
+- `skillS/amp-core/references/file-sync-guide.md` - Added tiered matching explanation
+- `skillS/amp-core/references/tool-reference.md` - Added ambiguity detection note
+
+**Technical Challenges**:
+- Deduplicating paths (FileLog and FileChunk may have same path)
+- Ensuring consistent behavior across both endpoints
+- Balancing flexibility with safety
+
+**Files Modified**:
+- `amp/server/src/handlers/codebase.rs` - Tiered matching in `sync_file` and `get_file_log_object`
+- `skillS/amp-core/references/file-sync-guide.md` - Tiered matching documentation
+- `skillS/amp-core/references/tool-reference.md` - Ambiguity detection note
+
+**Test Results**:
+```
+✅ amp_file_sync with "test-repo/python/sample.py" - Found existing file
+✅ amp_file_sync with "sample.py" (basename) - Works when unique
+✅ amp_filelog_get with relative path - Returns correct file log
+✅ Ambiguous path returns 409 Conflict with file list
+✅ Temporal + vector layers updated correctly
+```
+
+**Results**:
+- ✅ Flexible path matching (relative, absolute, basename)
+- ✅ Ambiguity detection prevents wrong-file updates
+- ✅ Helpful error messages with matching file list
+- ✅ Consistent behavior across sync and get endpoints
+- ✅ Documentation updated for agents
+
+**Time Spent**: 45 minutes
+**Status**: ✅ Complete
+
+---
+
+**Day 12 Summary**:
+- Total Time: 7.25 hours
+- Major Features: Skills documentation system, gitignore support, directory hierarchy, path resolution, flexible path matching with ambiguity detection
+- Improvements: Indexer exclusions, graph colors, file log lookup, cache workflow requirements, tiered path matching
+- Status: All features complete and functional
+
+---
+
+## Day 13: January 24, 2026
+
+### Morning - Artifact File Linking Enhancement (45 minutes)
+**Timestamp**: 2026-01-24 09:00 - 09:45
+**Objective**: Fix artifact-to-file relationships in knowledge graph to properly link artifacts with their associated files
+
+**Background**:
+- Artifacts with `linked_files` not appearing connected to file nodes in graph
+- File path resolution preferring FileLog artifacts over actual file symbol nodes
+- Object ID normalization mismatch between graph nodes and relationships
+- Unlinked artifacts needed fallback to artifact_core for visibility
+
+**Implementation Details**:
+
+**1. File Node Preference** (20 minutes):
+Changed file resolution priority:
+```rust
+// Old: Prefer FileLog artifacts
+SELECT id FROM objects 
+WHERE type = 'filelog' AND file_path = $path
+
+// New: Prefer actual file symbol nodes
+SELECT id FROM objects 
+WHERE type = 'symbol' AND kind = 'file' AND path = $path
+LIMIT 1
+
+// Fallback to FileLog only if no file node exists
+```
+
+**Rationale**:
+- File symbol nodes represent actual indexed files
+- FileLog artifacts are documentation about files
+- Linking to file nodes creates proper graph structure
+- Maintains separation between code structure and documentation
+
+**2. Object ID Normalization** (15 minutes):
+Fixed ID format inconsistency in graph adapter:
+```typescript
+// Relationships use clean IDs
+relationship.in = "abc-123-def"
+relationship.out = "xyz-789-ghi"
+
+// But nodes had prefixed IDs
+node.id = "objects:abc-123-def"  // ❌ Mismatch
+
+// Solution: Strip prefix in adapter
+node.id = id.replace(/^objects:/, "")  // ✓ Match
+```
+
+**Impact**:
+- Relationships now connect properly in graph visualization
+- Edge rendering works correctly
+- Node selection and highlighting functional
+
+**3. Artifact Core Fallback** (10 minutes):
+Maintained fallback behavior:
+- If file path doesn't resolve to file node → link to artifact_core
+- Prevents orphaned artifacts in graph
+- Ensures all artifacts visible and navigable
+- Artifact_core acts as organizational anchor
+
+**Linking Logic**:
+```rust
+if let Some(file_id) = find_file_node(&path).await {
+    // Link to actual file
+    create_relationship(artifact_id, "modifies", file_id);
+} else {
+    // Fallback to artifact core
+    create_relationship(artifact_id, "defined_in", artifact_core_id);
+}
+```
+
+**Technical Challenges**:
+- Distinguishing file nodes from FileLog artifacts
+- Ensuring ID format consistency across backend and frontend
+- Maintaining backward compatibility with existing artifacts
+- Balancing specificity with fallback behavior
+
+**Files Modified**:
+- `amp/server/src/handlers/artifacts.rs` - Prefer file symbol nodes in path resolution
+- `amp/ui/src/utils/graphDataAdapter.ts` - Normalize object IDs by stripping prefix
+- `amp/ui/src/hooks/useCodebases.ts` - Updated relationship ID handling
+
+**Results**:
+- ✅ Artifacts properly linked to file nodes in graph
+- ✅ Consistent ID formatting across system
+- ✅ Unlinked artifacts still visible via artifact_core
+- ✅ Proper graph structure for code-artifact relationships
+- ✅ Edge rendering working correctly
+
+**Time Spent**: 45 minutes
+**Status**: ✅ Complete
+
+---

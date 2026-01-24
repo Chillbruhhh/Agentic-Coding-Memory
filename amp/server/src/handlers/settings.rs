@@ -1,15 +1,13 @@
 use crate::models::settings::SettingsConfig;
 use crate::AppState;
 use axum::{
-    extract::{State, rejection::JsonRejection},
+    extract::{rejection::JsonRejection, State},
     http::StatusCode,
     response::IntoResponse,
     Json,
 };
 
-pub async fn get_settings(
-    State(state): State<AppState>,
-) -> impl IntoResponse {
+pub async fn get_settings(State(state): State<AppState>) -> impl IntoResponse {
     match state.settings_service.load_settings().await {
         Ok(settings) => (StatusCode::OK, Json(settings)).into_response(),
         Err(e) => {

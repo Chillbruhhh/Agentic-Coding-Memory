@@ -36,6 +36,7 @@ interface SettingsConfig {
   indexOpenrouterModel: string;
   indexOllamaModel: string;
   indexWorkers: number;
+  indexRespectGitignore: boolean;
   
   // Legacy
   maxEmbeddingDimension: number;
@@ -63,6 +64,7 @@ export const Settings: React.FC = () => {
     indexOpenrouterModel: 'openai/gpt-4o-mini',
     indexOllamaModel: 'llama3.1',
     indexWorkers: 4,
+    indexRespectGitignore: true,
     maxEmbeddingDimension: 1536,
   });
 
@@ -305,6 +307,23 @@ export const Settings: React.FC = () => {
               />
               <p className="text-xs text-stone-500 mt-2 font-mono">
                 Higher values speed up indexing but increase API load.
+              </p>
+            </div>
+
+            <div>
+              <label className="block text-xs font-mono text-stone-400 uppercase mb-2">Respect .gitignore</label>
+              <button
+                onClick={() => updateField('indexRespectGitignore', !config.indexRespectGitignore)}
+                className={`px-4 py-2 text-sm font-mono uppercase transition-all ${
+                  config.indexRespectGitignore
+                    ? 'bg-primary text-black border border-red-600 font-bold'
+                    : 'bg-stone-800 text-stone-400 border border-stone-700 hover:bg-stone-700 hover:text-stone-200'
+                }`}
+              >
+                {config.indexRespectGitignore ? 'Enabled' : 'Disabled'}
+              </button>
+              <p className="text-xs text-stone-500 mt-2 font-mono">
+                When enabled, files matched by .gitignore are skipped during indexing.
               </p>
             </div>
 

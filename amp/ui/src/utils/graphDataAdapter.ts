@@ -1,4 +1,4 @@
-// Graph data transformation utilities for AMP Console
+﻿// Graph data transformation utilities for AMP Console
 export interface AmpObject {
   id: string;
   type: string;
@@ -65,8 +65,9 @@ export const getNodeColor = (kind: string): string => {
     case 'method': return '#10b981'; // Green
     case 'variable': return '#f59e0b'; // Yellow
     case 'interface': return '#8b5cf6'; // Purple
-    case 'file': return '#6b7280'; // Gray
-    case 'directory': return '#4b5563'; // Dark gray
+    case 'file': return '#94a3b8'; // Soft slate
+    case 'directory': return '#38bdf8'; // Sky blue
+    case 'project': return '#ef4444'; // Bright red (repo core)
     case 'note': return '#6366f1'; // Indigo
     case 'decision': return '#7c3aed'; // Violet
     case 'changeset': return '#8b5cf6'; // Purple
@@ -84,7 +85,14 @@ export const transformAmpToGraph = (
   const codeSymbolKinds = ['function', 'class', 'method', 'variable', 'interface'];
   const allowedTypes = ['symbol', 'Symbol', 'file', 'File', 'note', 'decision', 'changeset', 'artifact_core'];
   const allowedKinds = [...codeSymbolKinds, 'file', 'project', 'directory', 'note', 'decision', 'changeset', 'artifact_core'];
-  
+
+  const normalizeId = (value: string) =>
+    value
+      .replace(/^objects:/, '')
+      .replace(/[âŸ¨âŸ©]/g, '')
+      .replace(/[`]/g, '')
+      .replace(/[\u27E8\u27E9]/g, '');
+
   const nodes: GraphNode[] = objects
     .filter(obj => {
       const kind = (obj.kind || obj.type || '').toLowerCase();
@@ -92,7 +100,7 @@ export const transformAmpToGraph = (
       return allowedTypes.includes(type) && allowedKinds.includes(kind);
     })
     .map(obj => ({
-      id: obj.id.replace(/[⟨⟩]/g, ''), // Remove brackets to match relationship format
+      id: normalizeId(obj.id), // Normalize to match relationship format
       name: obj.name || (obj as any).title || (obj.kind || obj.type || 'artifact'),
       kind: (obj.kind || obj.type) as string,
       path: obj.path,
@@ -109,11 +117,11 @@ export const transformAmpToGraph = (
       
       // Debug: check what the missing source/target objects are
       if (!sourceExists) {
-        const sourceObj = objects.find(obj => obj.id.replace(/[⟨⟩]/g, '') === rel.in);
+        const sourceObj = objects.find(obj => normalizeId(obj.id) === rel.in);
         console.log('Missing source object:', sourceObj?.kind, sourceObj?.type, sourceObj?.name);
       }
       if (!targetExists) {
-        const targetObj = objects.find(obj => obj.id.replace(/[⟨⟩]/g, '') === rel.out);
+        const targetObj = objects.find(obj => normalizeId(obj.id) === rel.out);
         console.log('Missing target object:', targetObj?.kind, targetObj?.type, targetObj?.name);
       }
       
@@ -160,3 +168,4 @@ export const getSymbolStats = (nodes: GraphNode[]) => {
     color: getNodeColor(kind)
   }));
 };
+

@@ -4,9 +4,9 @@ use axum::{
     response::Json,
 };
 use serde::Deserialize;
-use uuid::Uuid;
 use serde_json::Value;
 use tokio::time::{timeout, Duration};
+use uuid::Uuid;
 
 use crate::{models::relationships::*, surreal_json::take_json_values, AppState};
 
@@ -26,7 +26,7 @@ pub async fn create_relationship(
 ) -> Result<(StatusCode, Json<RelationshipResponse>), StatusCode> {
     let relationship_id = Uuid::new_v4();
     let now = chrono::Utc::now();
-    
+
     // Determine table name based on relationship type
     let table_name = match request.relation_type {
         RelationType::DependsOn => "depends_on",
@@ -37,29 +37,35 @@ pub async fn create_relationship(
         RelationType::Implements => "implements",
         RelationType::Produced => "produced",
     };
-    
+
     // Verify both objects exist first - use simple SELECT instead of type::record
     // Skip verification - SurrealDB enum serialization issues prevent proper verification
-    tracing::info!("Creating relationship: {} -> {} -> {}", request.source_id, table_name, request.target_id);
-    
+    tracing::info!(
+        "Creating relationship: {} -> {} -> {}",
+        request.source_id,
+        table_name,
+        request.target_id
+    );
+
     // Use RELATE statement for graph edges - use hyphenated UUID format
     let query = format!(
         "RELATE objects:`{}`->{}->objects:`{}` SET created_at = time::now()",
         request.source_id, table_name, request.target_id
     );
-    
+
     tracing::debug!("Creating relationship: {}", query);
-    
-    let result = timeout(
-        Duration::from_secs(5),
-        state.db.client.query(query)
-    ).await;
-    
+
+    let result = timeout(Duration::from_secs(5), state.db.client.query(query)).await;
+
     match result {
         Ok(Ok(_response)) => {
-            tracing::info!("Created relationship: {} -> {} ({})", 
-                request.source_id, request.target_id, table_name);
-            
+            tracing::info!(
+                "Created relationship: {} -> {} ({})",
+                request.source_id,
+                request.target_id,
+                table_name
+            );
+
             Ok((
                 StatusCode::CREATED,
                 Json(RelationshipResponse {
@@ -88,22 +94,31 @@ pub async fn get_relationships(
 ) -> Result<Json<Vec<Value>>, StatusCode> {
     tracing::debug!(
         "Relationship query params: object_id={:?}, source_id={:?}, target_id={:?}, type={:?}",
-        query.object_id, query.source_id, query.target_id, query.relation_type
+        query.object_id,
+        query.source_id,
+        query.target_id,
+        query.relation_type
     );
     // Build query based on filters - use SELECT VALUE to avoid enum serialization issues
-    let mut query_str = String::from("SELECT VALUE { in: string::concat(in.id), out: string::concat(out.id), type: meta::tb(id), created_at: created_at } FROM [");
-    
+    // Note: in/out ARE the record IDs directly (e.g., objects:uuid), not objects with .id property
+    let mut query_str = String::from("SELECT VALUE { in: string::concat(in), out: string::concat(out), type: meta::tb(id), created_at: created_at } FROM [");
+
     if let Some(rel_type) = &query.relation_type {
         query_str.push_str(rel_type);
     } else {
-        query_str.push_str("depends_on, defined_in, calls, justified_by, modifies, implements, produced");
+        query_str.push_str(
+            "depends_on, defined_in, calls, justified_by, modifies, implements, produced",
+        );
     }
-    
+
     query_str.push_str("]");
-    
+
     let mut conditions = Vec::new();
     if query.object_id.is_some() {
-        conditions.push("(in = type::thing('objects', $object) OR out = type::thing('objects', $object))".to_string());
+        conditions.push(
+            "(in = type::thing('objects', $object) OR out = type::thing('objects', $object))"
+                .to_string(),
+        );
     }
     if query.source_id.is_some() {
         conditions.push("out = type::thing('objects', $source)".to_string());
@@ -111,14 +126,14 @@ pub async fn get_relationships(
     if query.target_id.is_some() {
         conditions.push("in = type::thing('objects', $target)".to_string());
     }
-    
+
     if !conditions.is_empty() {
         query_str.push_str(" WHERE ");
         query_str.push_str(&conditions.join(" AND "));
     }
-    
+
     tracing::debug!("Relationship query: {}", query_str);
-    
+
     let mut query_exec = state.db.client.query(query_str);
     if let Some(object) = query.object_id {
         query_exec = query_exec.bind(("object", object));
@@ -129,11 +144,8 @@ pub async fn get_relationships(
     if let Some(target) = query.target_id {
         query_exec = query_exec.bind(("target", target));
     }
-    let result = timeout(
-        Duration::from_secs(5),
-        query_exec
-    ).await;
-    
+    let result = timeout(Duration::from_secs(5), query_exec).await;
+
     match result {
         Ok(Ok(mut response)) => {
             let relationships: Vec<Value> = take_json_values(&mut response, 0);
@@ -158,9 +170,10 @@ pub async fn delete_relationship(
 ) -> Result<StatusCode, StatusCode> {
     let result: Result<Result<Option<Value>, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client.delete((rel_type.as_str(), id))
-    ).await;
-    
+        state.db.client.delete((rel_type.as_str(), id)),
+    )
+    .await;
+
     match result {
         Ok(Ok(Some(_))) => {
             tracing::info!("Deleted relationship: {}:{}", rel_type, id);

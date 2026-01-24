@@ -41,8 +41,22 @@ impl IndexLlmService {
         input: AiFileLogInput,
     ) -> Result<AiFileLogOutput> {
         match settings.index_provider.as_str() {
-            "openai" => self.generate_openai(settings, input, "https://api.openai.com/v1/chat/completions").await,
-            "openrouter" => self.generate_openai(settings, input, "https://openrouter.ai/api/v1/chat/completions").await,
+            "openai" => {
+                self.generate_openai(
+                    settings,
+                    input,
+                    "https://api.openai.com/v1/chat/completions",
+                )
+                .await
+            }
+            "openrouter" => {
+                self.generate_openai(
+                    settings,
+                    input,
+                    "https://openrouter.ai/api/v1/chat/completions",
+                )
+                .await
+            }
             "ollama" => self.generate_ollama(settings, input).await,
             _ => anyhow::bail!("Index model provider is disabled"),
         }
@@ -208,12 +222,14 @@ fn parse_filelog_json(raw: &str) -> Result<AiFileLogOutput> {
         return Ok(parsed);
     }
 
-    let candidate = extract_json_block(trimmed).context("Failed to locate JSON in model response")?;
+    let candidate =
+        extract_json_block(trimmed).context("Failed to locate JSON in model response")?;
     if let Ok(parsed) = serde_json::from_str::<AiFileLogOutput>(&candidate) {
         return Ok(parsed);
     }
 
-    let value: Value = serde_json::from_str(&candidate).context("Failed to parse index model JSON")?;
+    let value: Value =
+        serde_json::from_str(&candidate).context("Failed to parse index model JSON")?;
     coerce_filelog_value(value).context("Failed to coerce index model JSON")
 }
 

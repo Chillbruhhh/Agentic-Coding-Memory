@@ -1,8 +1,8 @@
 use crate::models::settings::SettingsConfig;
 use anyhow::Result;
-use surrealdb::Surreal;
-use surrealdb::engine::any::Any;
 use std::env;
+use surrealdb::engine::any::Any;
+use surrealdb::Surreal;
 
 pub struct SettingsService {
     db: Surreal<Any>,
@@ -27,10 +27,8 @@ impl SettingsService {
 
     /// Load settings from database
     async fn load_from_db(&self) -> Result<SettingsConfig> {
-        let result: Option<SettingsConfig> = self.db
-            .select(("settings", "config"))
-            .await?;
-        
+        let result: Option<SettingsConfig> = self.db.select(("settings", "config")).await?;
+
         result.ok_or_else(|| anyhow::anyhow!("Settings not found in database"))
     }
 
@@ -41,26 +39,21 @@ impl SettingsService {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(8105),
-            bind_address: env::var("BIND_ADDRESS")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            bind_address: env::var("BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1".to_string()),
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "ws://localhost:7505/rpc".to_string()),
-            db_user: env::var("DB_USER")
-                .unwrap_or_else(|_| "root".to_string()),
-            db_pass: env::var("DB_PASS")
-                .unwrap_or_else(|_| "root".to_string()),
+            db_user: env::var("DB_USER").unwrap_or_else(|_| "root".to_string()),
+            db_pass: env::var("DB_PASS").unwrap_or_else(|_| "root".to_string()),
             embedding_provider: env::var("EMBEDDING_PROVIDER")
                 .unwrap_or_else(|_| "none".to_string()),
-            openai_api_key: env::var("OPENAI_API_KEY")
-                .unwrap_or_default(),
+            openai_api_key: env::var("OPENAI_API_KEY").unwrap_or_default(),
             openai_model: env::var("EMBEDDING_MODEL")
                 .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
             openai_dimension: env::var("EMBEDDING_DIMENSION")
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1536),
-            openrouter_api_key: env::var("OPENROUTER_API_KEY")
-                .unwrap_or_default(),
+            openrouter_api_key: env::var("OPENROUTER_API_KEY").unwrap_or_default(),
             openrouter_model: env::var("OPENROUTER_EMBEDDING_MODEL")
                 .unwrap_or_else(|_| "text-embedding-3-small".to_string()),
             openrouter_dimension: env::var("OPENROUTER_EMBEDDING_DIMENSION")
@@ -75,8 +68,7 @@ impl SettingsService {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(768),
-            index_provider: env::var("INDEX_PROVIDER")
-                .unwrap_or_else(|_| "none".to_string()),
+            index_provider: env::var("INDEX_PROVIDER").unwrap_or_else(|_| "none".to_string()),
             index_openai_model: env::var("INDEX_OPENAI_MODEL")
                 .unwrap_or_else(|_| "gpt-4o-mini".to_string()),
             index_openrouter_model: env::var("INDEX_OPENROUTER_MODEL")
@@ -87,6 +79,13 @@ impl SettingsService {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(4),
+            index_respect_gitignore: env::var("INDEX_RESPECT_GITIGNORE")
+                .ok()
+                .map(|value| {
+                    let normalized = value.trim().to_ascii_lowercase();
+                    matches!(normalized.as_str(), "1" | "true" | "yes" | "on")
+                })
+                .unwrap_or(true),
             max_embedding_dimension: env::var("MAX_EMBEDDING_DIMENSION")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -96,7 +95,8 @@ impl SettingsService {
 
     /// Save settings to database
     pub async fn save_settings(&self, settings: SettingsConfig) -> Result<SettingsConfig> {
-        let saved: Option<SettingsConfig> = self.db
+        let saved: Option<SettingsConfig> = self
+            .db
             .upsert(("settings", "config"))
             .content(settings)
             .await?;

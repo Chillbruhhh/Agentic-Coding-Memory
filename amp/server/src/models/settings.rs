@@ -6,15 +6,15 @@ pub struct SettingsConfig {
     // Server Settings
     pub port: u16,
     pub bind_address: String,
-    
+
     // Database Settings
     pub database_url: String,
     pub db_user: String,
     pub db_pass: String,
-    
+
     // Embedding Provider
     pub embedding_provider: String, // "openai", "openrouter", "ollama", or "none"
-    
+
     // OpenAI Settings
     pub openai_api_key: String,
     pub openai_model: String,
@@ -24,7 +24,7 @@ pub struct SettingsConfig {
     pub openrouter_api_key: String,
     pub openrouter_model: String,
     pub openrouter_dimension: u32,
-    
+
     // Ollama Settings
     pub ollama_url: String,
     pub ollama_model: String,
@@ -36,7 +36,9 @@ pub struct SettingsConfig {
     pub index_openrouter_model: String,
     pub index_ollama_model: String,
     pub index_workers: u32,
-    
+    #[serde(default)]
+    pub index_respect_gitignore: bool,
+
     // Legacy
     pub max_embedding_dimension: u32,
 }
@@ -64,6 +66,7 @@ impl Default for SettingsConfig {
             index_openrouter_model: "openai/gpt-4o-mini".to_string(),
             index_ollama_model: "llama3.1".to_string(),
             index_workers: 4,
+            index_respect_gitignore: true,
             max_embedding_dimension: 1536,
         }
     }

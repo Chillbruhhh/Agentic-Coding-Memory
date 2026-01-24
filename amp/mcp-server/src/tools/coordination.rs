@@ -27,7 +27,10 @@ pub async fn handle_lease_acquire(
 
     let result = client.acquire_lease(payload).await?;
 
-    Ok(vec![Content::text(format!("Lease acquired: {}", serde_json::to_string_pretty(&result)?))])
+    Ok(vec![Content::text(format!(
+        "Lease acquired: {}",
+        serde_json::to_string_pretty(&result)?
+    ))])
 }
 
 pub async fn handle_lease_release(
@@ -40,5 +43,8 @@ pub async fn handle_lease_release(
 
     let result = client.release_lease(payload).await?;
 
-    Ok(vec![Content::text(format!("Lease released: {}", serde_json::to_string_pretty(&result)?))])
+    Ok(vec![Content::text(format!(
+        "Lease released: {}",
+        serde_json::to_string_pretty(&result)?
+    ))])
 }

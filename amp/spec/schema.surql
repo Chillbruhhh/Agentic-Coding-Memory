@@ -150,7 +150,7 @@ DEFINE INDEX idx_file_chunks_hash ON file_chunks COLUMNS content_hash;
 DEFINE INDEX idx_file_chunks_file_id ON file_chunks COLUMNS file_id;
 DEFINE INDEX idx_file_chunks_embedding ON file_chunks COLUMNS embedding MTREE DIMENSION 1536;
 
--- FileLog table for semantic file summaries
+-- FileLog table for semantic file summaries with audit trail
 DEFINE TABLE file_logs SCHEMAFULL;
 DEFINE FIELD id ON file_logs TYPE record<file_logs>;
 DEFINE FIELD file_path ON file_logs TYPE string;
@@ -164,6 +164,9 @@ DEFINE FIELD embedding ON file_logs TYPE option<array<float>>;
 DEFINE FIELD last_modified ON file_logs TYPE datetime;
 DEFINE FIELD change_count ON file_logs TYPE int DEFAULT 0;
 DEFINE FIELD linked_changesets ON file_logs TYPE array<string>;
+-- Audit trail: concise record of changes (1-4 sentences each)
+-- Structure: [{ timestamp, action, summary, run_id?, agent_id? }]
+DEFINE FIELD audit_trail ON file_logs TYPE array<object> DEFAULT [];
 DEFINE FIELD tenant_id ON file_logs TYPE string;
 DEFINE FIELD project_id ON file_logs TYPE string;
 DEFINE FIELD created_at ON file_logs TYPE datetime DEFAULT time::now();
@@ -203,3 +206,81 @@ DEFINE FIELD tags ON filelogs TYPE option<array<string>>;
 -- Indexes for filelogs
 DEFINE INDEX idx_filelogs_path ON filelogs COLUMNS file_path;
 DEFINE INDEX idx_filelogs_agent ON filelogs COLUMNS agent_id;
+
+-- ============================================================================
+-- Semantic Cache (Episodic Memory) - Rolling window of session context
+-- ============================================================================
+
+-- Cache Blocks: Episodic memory units (rolling window of ~20 blocks)
+-- Each block holds 1800-2000 tokens of structured session context
+DEFINE TABLE cache_block SCHEMAFULL;
+DEFINE FIELD id ON cache_block TYPE record<cache_block>;
+DEFINE FIELD scope_id ON cache_block TYPE string;
+DEFINE FIELD sequence ON cache_block TYPE int;
+DEFINE FIELD status ON cache_block TYPE string DEFAULT "open" ASSERT $value IN ["open", "closed"];
+
+-- Quick-access summary (~200 tokens) for efficient search
+DEFINE FIELD summary ON cache_block TYPE option<string>;
+DEFINE FIELD summary_embedding ON cache_block TYPE option<array<float>>;
+
+-- Full structured content
+DEFINE FIELD items ON cache_block TYPE array<object> DEFAULT [];
+DEFINE FIELD token_count ON cache_block TYPE int DEFAULT 0;
+
+-- Timestamps
+DEFINE FIELD created_at ON cache_block TYPE datetime DEFAULT time::now();
+DEFINE FIELD closed_at ON cache_block TYPE option<datetime>;
+
+-- Indexes for cache_block
+DEFINE INDEX idx_cache_block_scope ON cache_block COLUMNS scope_id;
+DEFINE INDEX idx_cache_block_sequence ON cache_block COLUMNS scope_id, sequence;
+DEFINE INDEX idx_cache_block_status ON cache_block COLUMNS scope_id, status;
+DEFINE INDEX idx_cache_block_summary_embedding ON cache_block COLUMNS summary_embedding MTREE DIMENSION 1536;
+
+-- Cache Block Item structure (stored in items array):
+-- {
+--   kind: "fact" | "decision" | "snippet" | "warning",
+--   content: string,
+--   importance: float (0-1),
+--   file_ref: option<string>,  -- For snippets
+--   created_at: datetime
+-- }
+
+-- Legacy cache_frame (kept for backward compatibility, will be migrated)
+DEFINE TABLE cache_frame SCHEMAFULL;
+DEFINE FIELD scope_id ON cache_frame TYPE string;
+DEFINE FIELD summary ON cache_frame TYPE string;
+DEFINE FIELD summary_embedding ON cache_frame TYPE option<array<float>>;
+DEFINE FIELD version ON cache_frame TYPE int DEFAULT 0;
+DEFINE FIELD token_count ON cache_frame TYPE int DEFAULT 0;
+DEFINE FIELD updated_at ON cache_frame TYPE datetime DEFAULT time::now();
+DEFINE FIELD ttl_expires_at ON cache_frame TYPE option<datetime>;
+DEFINE FIELD created_at ON cache_frame TYPE datetime DEFAULT time::now();
+
+-- Indexes for cache_frame
+DEFINE INDEX idx_cache_frame_scope ON cache_frame COLUMNS scope_id UNIQUE;
+DEFINE INDEX idx_cache_frame_ttl ON cache_frame COLUMNS ttl_expires_at;
+DEFINE INDEX idx_cache_frame_embedding ON cache_frame COLUMNS summary_embedding MTREE DIMENSION 1536;
+
+-- Legacy cache_item (kept for backward compatibility, will be migrated)
+DEFINE TABLE cache_item SCHEMAFULL;
+DEFINE FIELD scope_id ON cache_item TYPE string;
+DEFINE FIELD artifact_id ON cache_item TYPE option<string>;
+DEFINE FIELD kind ON cache_item TYPE string ASSERT $value IN ["fact", "decision", "snippet", "warning"];
+DEFINE FIELD preview ON cache_item TYPE string;
+DEFINE FIELD facts ON cache_item TYPE array<string> DEFAULT [];
+DEFINE FIELD embedding ON cache_item TYPE option<array<float>>;
+DEFINE FIELD importance ON cache_item TYPE float DEFAULT 0.5;
+DEFINE FIELD access_count ON cache_item TYPE int DEFAULT 0;
+DEFINE FIELD ttl_expires_at ON cache_item TYPE option<datetime>;
+DEFINE FIELD version ON cache_item TYPE int DEFAULT 0;
+DEFINE FIELD provenance ON cache_item TYPE object DEFAULT {};
+DEFINE FIELD created_at ON cache_item TYPE datetime DEFAULT time::now();
+DEFINE FIELD updated_at ON cache_item TYPE datetime DEFAULT time::now();
+
+-- Indexes for cache_item
+DEFINE INDEX idx_cache_item_scope ON cache_item COLUMNS scope_id;
+DEFINE INDEX idx_cache_item_kind ON cache_item COLUMNS kind;
+DEFINE INDEX idx_cache_item_importance ON cache_item COLUMNS importance;
+DEFINE INDEX idx_cache_item_ttl ON cache_item COLUMNS ttl_expires_at;
+DEFINE INDEX idx_cache_item_embedding ON cache_item COLUMNS embedding MTREE DIMENSION 1536;

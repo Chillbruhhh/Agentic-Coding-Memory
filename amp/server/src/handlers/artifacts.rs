@@ -1,9 +1,5 @@
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::Json,
-};
 use axum::extract::Path;
+use axum::{extract::State, http::StatusCode, response::Json};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::time::{timeout, Duration};
@@ -177,7 +173,8 @@ fn extract_embedding_text(request: &WriteArtifactRequest) -> String {
         }
     }
 
-    parts.into_iter()
+    parts
+        .into_iter()
         .filter(|s| !s.trim().is_empty())
         .collect::<Vec<_>>()
         .join("\n")
@@ -208,10 +205,13 @@ fn build_artifact_object(request: &WriteArtifactRequest, _object_id: &str) -> Va
     if let Some(agent_id) = &request.agent_id {
         map.insert("agent_id".to_string(), Value::String(agent_id.clone()));
         // Also add to provenance for consistency
-        map.insert("provenance".to_string(), serde_json::json!({
-            "agent": agent_id,
-            "summary": format!("Created {} artifact", request.artifact_type)
-        }));
+        map.insert(
+            "provenance".to_string(),
+            serde_json::json!({
+                "agent": agent_id,
+                "summary": format!("Created {} artifact", request.artifact_type)
+            }),
+        );
     }
     if let Some(run_id) = &request.run_id {
         map.insert("run_id".to_string(), Value::String(run_id.clone()));
@@ -230,7 +230,10 @@ fn build_artifact_object(request: &WriteArtifactRequest, _object_id: &str) -> Va
                 map.insert("decision".to_string(), Value::String(decision.clone()));
             }
             if let Some(consequences) = &request.consequences {
-                map.insert("consequences".to_string(), Value::String(consequences.clone()));
+                map.insert(
+                    "consequences".to_string(),
+                    Value::String(consequences.clone()),
+                );
             }
             if let Some(alternatives) = &request.alternatives {
                 map.insert("alternatives".to_string(), serde_json::json!(alternatives));
@@ -251,7 +254,8 @@ fn build_artifact_object(request: &WriteArtifactRequest, _object_id: &str) -> Va
             }
             if let Some(symbols) = &request.symbols {
                 map.insert("symbols".to_string(), serde_json::json!(symbols));
-                map.insert("key_symbols".to_string(), serde_json::json!(symbols)); // For compatibility
+                map.insert("key_symbols".to_string(), serde_json::json!(symbols));
+                // For compatibility
             }
             if let Some(dependencies) = &request.dependencies {
                 map.insert("dependencies".to_string(), serde_json::json!(dependencies));
@@ -265,21 +269,36 @@ fn build_artifact_object(request: &WriteArtifactRequest, _object_id: &str) -> Va
                 map.insert("category".to_string(), Value::String(category.clone()));
             }
             if let Some(linked_objects) = &request.linked_objects {
-                map.insert("linked_objects".to_string(), serde_json::json!(linked_objects));
+                map.insert(
+                    "linked_objects".to_string(),
+                    serde_json::json!(linked_objects),
+                );
             }
         }
         ArtifactType::ChangeSet => {
             if let Some(description) = &request.description {
-                map.insert("description".to_string(), Value::String(description.clone()));
+                map.insert(
+                    "description".to_string(),
+                    Value::String(description.clone()),
+                );
             }
             if let Some(diff_summary) = &request.diff_summary {
-                map.insert("diff_summary".to_string(), Value::String(diff_summary.clone()));
+                map.insert(
+                    "diff_summary".to_string(),
+                    Value::String(diff_summary.clone()),
+                );
             }
             if let Some(files_changed) = &request.files_changed {
-                map.insert("files_changed".to_string(), serde_json::json!(files_changed));
+                map.insert(
+                    "files_changed".to_string(),
+                    serde_json::json!(files_changed),
+                );
             }
             if let Some(linked_decisions) = &request.linked_decisions {
-                map.insert("linked_decisions".to_string(), serde_json::json!(linked_decisions));
+                map.insert(
+                    "linked_decisions".to_string(),
+                    serde_json::json!(linked_decisions),
+                );
             }
         }
     }
@@ -325,7 +344,11 @@ pub async fn write_artifact(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to generate embedding for artifact {}: {}", object_id, e);
+                    tracing::warn!(
+                        "Failed to generate embedding for artifact {}: {}",
+                        object_id,
+                        e
+                    );
                 }
             }
         }
@@ -333,21 +356,23 @@ pub async fn write_artifact(
 
     // Update memory_layers to reflect actual state
     if let Some(map) = artifact_obj.as_object_mut() {
-        map.insert("memory_layers".to_string(), serde_json::json!({
-            "graph": true,
-            "vector": vector_written,
-            "temporal": true
-        }));
+        map.insert(
+            "memory_layers".to_string(),
+            serde_json::json!({
+                "graph": true,
+                "vector": vector_written,
+                "temporal": true
+            }),
+        );
     }
 
     // === LAYER 1: Temporal Layer - Write to objects table ===
     let query = format!("CREATE objects:`{}` CONTENT $data", object_id);
     let result = timeout(
         Duration::from_secs(5),
-        state.db.client
-            .query(query)
-            .bind(("data", artifact_obj)),
-    ).await;
+        state.db.client.query(query).bind(("data", artifact_obj)),
+    )
+    .await;
 
     match result {
         Ok(Ok(_)) => {
@@ -380,7 +405,12 @@ pub async fn write_artifact(
 
         match timeout(Duration::from_secs(2), state.db.client.query(query)).await {
             Ok(Ok(_)) => {
-                tracing::debug!("Created relationship: {} -> {} -> {}", source_id, relation_type, target_id);
+                tracing::debug!(
+                    "Created relationship: {} -> {} -> {}",
+                    source_id,
+                    relation_type,
+                    target_id
+                );
                 true
             }
             Ok(Err(e)) => {
@@ -409,7 +439,9 @@ pub async fn write_artifact(
         let query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'artifact_core' LIMIT 1".to_string();
         let name = "Artifact Core".to_string();
 
-        if let Ok(Ok(mut response)) = timeout(Duration::from_secs(2), state.db.client.query(query)).await {
+        if let Ok(Ok(mut response)) =
+            timeout(Duration::from_secs(2), state.db.client.query(query)).await
+        {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             if let Some(core_obj) = results.first() {
                 if let Some(core_id) = core_obj.get("id").and_then(|v| v.as_str()) {
@@ -420,7 +452,7 @@ pub async fn write_artifact(
 
         let core_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let mut core_obj = serde_json::json!({
+        let core_obj = serde_json::json!({
             "type": "artifact_core",
             "kind": "artifact_core",
             "name": name,
@@ -439,62 +471,64 @@ pub async fn write_artifact(
         }
     }
 
-    // Helper to find a file node by exact path (file type preferred, fallback to symbol kind file)
+    // Helper to find a file node by exact path (prefer file symbols, fallback to FileLog)
     async fn find_file_node_id(state: &AppState, file_path: &str) -> Option<String> {
-        let mut candidates = Vec::new();
-        let trimmed = file_path.trim();
-        if !trimmed.is_empty() {
-            candidates.push(trimmed.to_string());
-            candidates.push(trimmed.replace('/', "\\"));
-            let no_prefix = trimmed.trim_start_matches("./").trim_start_matches(".\\");
-            candidates.push(format!(".\\{}", no_prefix));
-            candidates.push(format!(".\\{}", no_prefix.replace('/', "\\")));
-        }
-        candidates.sort();
-        candidates.dedup();
-
-        if candidates.is_empty() {
+        let trimmed = file_path.trim().to_string();
+        if trimmed.is_empty() {
             return None;
         }
 
-        let path_list = candidates
-            .iter()
-            .map(|p| {
-                let escaped = p
-                    .replace("\\", "\\\\")
-                    .replace("'", "\\'");
-                format!("'{}'", escaped)
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
+        // Normalize path for matching
+        let normalized = trimmed.replace('/', "\\");
+        let basename = trimmed
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(&trimmed)
+            .to_string();
 
-        let find_query = format!(
-            "SELECT id FROM objects WHERE type = 'file' AND path IN [{}] LIMIT 1",
-            path_list
-        );
+        tracing::info!("find_file_node_id: looking for '{}' (norm='{}', basename='{}')", trimmed, normalized, basename);
+
+        // Try file nodes first so graph links attach to file nodes.
+        // Use string::concat(id) to convert SurrealDB Thing to JSON-serializable string.
+        let symbol_query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE ((type = 'file') OR (type = 'symbol' AND kind = 'file')) AND ((path = $path OR path CONTAINS $path OR path CONTAINS $norm OR path CONTAINS $basename) OR (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename)) LIMIT 1";
         if let Ok(Ok(mut response)) = timeout(
             Duration::from_secs(2),
-            state.db.client.query(find_query)
-        ).await {
+            state.db.client
+                .query(symbol_query)
+                .bind(("path", trimmed.clone()))
+                .bind(("norm", normalized.clone()))
+                .bind(("basename", basename.clone())),
+        )
+        .await
+        {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
+            tracing::info!("find_file_node_id: file symbol query returned {} results: {:?}", results.len(), results);
             if let Some(file_obj) = results.first() {
                 if let Some(file_id) = file_obj.get("id").and_then(|v| v.as_str()) {
+                    tracing::info!("find_file_node_id: found file symbol id={}", file_id);
                     return Some(normalize_surreal_id(file_id));
                 }
             }
+        } else {
+            tracing::warn!("find_file_node_id: file symbol query failed or timed out");
         }
 
-        let fallback_query = format!(
-            "SELECT id FROM objects WHERE type = 'symbol' AND kind = 'file' AND path IN [{}] LIMIT 1",
-            path_list
-        );
+        // Fallback: try FileLog with CONTAINS matching (handles relative paths)
+        let filelog_query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename) LIMIT 1";
         if let Ok(Ok(mut response)) = timeout(
             Duration::from_secs(2),
-            state.db.client.query(fallback_query)
-        ).await {
+            state.db.client
+                .query(filelog_query)
+                .bind(("path", trimmed))
+                .bind(("norm", normalized))
+                .bind(("basename", basename)),
+        )
+        .await
+        {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             if let Some(file_obj) = results.first() {
                 if let Some(file_id) = file_obj.get("id").and_then(|v| v.as_str()) {
+                    tracing::info!("find_file_node_id: found FileLog id={}", file_id);
                     return Some(normalize_surreal_id(file_id));
                 }
             }
@@ -511,10 +545,9 @@ pub async fn write_artifact(
             "SELECT id FROM objects WHERE (type = 'symbol' OR type = 'project') AND kind = 'project' AND project_id = '{}' LIMIT 1",
             project_id.replace("'", "\\'")
         );
-        if let Ok(Ok(mut response)) = timeout(
-            Duration::from_secs(2),
-            state.db.client.query(project_query)
-        ).await {
+        if let Ok(Ok(mut response)) =
+            timeout(Duration::from_secs(2), state.db.client.query(project_query)).await
+        {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             if let Some(project_obj) = results.first() {
                 if let Some(proj_id) = project_obj.get("id").and_then(|v| v.as_str()) {
@@ -647,9 +680,7 @@ pub async fn list_artifacts(
 ) -> Result<Json<Vec<Value>>, StatusCode> {
     let limit = query.limit.unwrap_or(100);
 
-    let mut conditions = vec![
-        "type IN ['decision', 'filelog', 'note', 'changeset']".to_string()
-    ];
+    let mut conditions = vec!["type IN ['decision', 'filelog', 'note', 'changeset']".to_string()];
 
     if let Some(artifact_type) = &query.artifact_type {
         conditions.push(format!("type = '{}'", artifact_type.to_lowercase()));
@@ -669,10 +700,7 @@ pub async fn list_artifacts(
 
     tracing::debug!("List artifacts query: {}", query_str);
 
-    let result = timeout(
-        Duration::from_secs(5),
-        state.db.client.query(query_str)
-    ).await;
+    let result = timeout(Duration::from_secs(5), state.db.client.query(query_str)).await;
 
     match result {
         Ok(Ok(mut response)) => {
@@ -700,12 +728,20 @@ pub async fn delete_artifact(
     let delete_rels_query = "DELETE FROM [depends_on, defined_in, calls, justified_by, modifies, implements, produced] WHERE in = type::thing('objects', $id) OR out = type::thing('objects', $id)";
     let rels_result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client.query(delete_rels_query).bind(("id", raw_id.clone())),
+        state
+            .db
+            .client
+            .query(delete_rels_query)
+            .bind(("id", raw_id.clone())),
     )
     .await;
 
     if let Ok(Err(e)) = rels_result {
-        tracing::warn!("Failed to delete relationships for artifact {}: {}", raw_id, e);
+        tracing::warn!(
+            "Failed to delete relationships for artifact {}: {}",
+            raw_id,
+            e
+        );
     }
 
     let delete_obj_query = "DELETE type::record('objects', $id)";

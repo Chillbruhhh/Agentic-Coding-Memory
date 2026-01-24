@@ -1,14 +1,16 @@
-use tokio::process::{Command, Child};
+use tokio::process::{Child, ChildStderr, ChildStdout, Command};
 use std::process::Stdio;
 use anyhow::Result;
 
 pub struct AgentProcess {
     child: Child,
     command: String,
+    stdout: Option<ChildStdout>,
+    stderr: Option<ChildStderr>,
 }
 
 impl AgentProcess {
-    pub async fn spawn(command: &str) -> Result<Self> {
+    pub async fn spawn(command: &str, capture_output: bool) -> Result<Self> {
         tracing::info!("Spawning agent process: {}", command);
         
         let mut cmd = if cfg!(target_os = "windows") {
@@ -30,14 +32,23 @@ impl AgentProcess {
         
         // Allow full terminal interaction for interactive agents
         cmd.stdin(Stdio::inherit());
-        cmd.stdout(Stdio::inherit());
-        cmd.stderr(Stdio::inherit());
+        if capture_output {
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::piped());
+        } else {
+            cmd.stdout(Stdio::inherit());
+            cmd.stderr(Stdio::inherit());
+        }
         
-        let child = cmd.spawn()?;
+        let mut child = cmd.spawn()?;
+        let stdout = child.stdout.take();
+        let stderr = child.stderr.take();
         
         Ok(Self {
             child,
             command: command.to_string(),
+            stdout,
+            stderr,
         })
     }
 
@@ -58,6 +69,14 @@ impl AgentProcess {
     pub fn id(&self) -> Option<u32> {
         self.child.id()
     }
+
+    pub fn take_stdout(&mut self) -> Option<ChildStdout> {
+        self.stdout.take()
+    }
+
+    pub fn take_stderr(&mut self) -> Option<ChildStderr> {
+        self.stderr.take()
+    }
 }
 
 impl Drop for AgentProcess {
@@ -75,14 +94,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_process_spawn() {
-        let mut process = AgentProcess::spawn("echo 'hello world'").await.unwrap();
+        let mut process = AgentProcess::spawn("echo 'hello world'", false).await.unwrap();
         let exit_code = process.wait_for_completion().await.unwrap();
         assert_eq!(exit_code, 0);
     }
 
     #[tokio::test]
     async fn test_process_kill() {
-        let mut process = AgentProcess::spawn("sleep 10").await.unwrap();
+        let mut process = AgentProcess::spawn("sleep 10", false).await.unwrap();
         process.kill().await.unwrap();
     }
 }

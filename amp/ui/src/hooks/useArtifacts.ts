@@ -30,14 +30,11 @@ const normalizeArtifact = (raw: any): ArtifactSummary => {
   // Determine artifact type from the raw object
   const type = (raw.type || raw.artifact_type || 'note').toLowerCase() as ArtifactType;
 
-  // Generate preview based on type
+  // Generate preview based on type (agent-authored artifacts only)
   let preview = '';
   switch (type) {
     case 'decision':
       preview = raw.decision || raw.context || '';
-      break;
-    case 'filelog':
-      preview = raw.summary || raw.file_path || '';
       break;
     case 'note':
       preview = raw.content || '';
@@ -56,8 +53,8 @@ const normalizeArtifact = (raw: any): ArtifactSummary => {
     id: raw.id,
     type,
     title: raw.title || raw.name || `${type} artifact`,
-    created_at: raw.created_at || new Date().toISOString(),
-    updated_at: raw.updated_at || raw.created_at || new Date().toISOString(),
+    created_at: raw.created_at || '',
+    updated_at: raw.updated_at || raw.created_at || '',
     agent_id: raw.agent_id || raw.provenance?.agent,
     run_id: raw.run_id,
     project_id: raw.project_id,
@@ -84,8 +81,8 @@ export const useArtifacts = (filters?: ArtifactFilters) => {
       }
       setError(null);
 
-      // Build filter for artifact types
-      const typeFilters = filters?.type || ['decision', 'filelog', 'note', 'changeset', 'Decision', 'FileLog', 'Note', 'ChangeSet', 'Changeset'];
+      // Build filter for artifact types (excludes filelog - those are indexer output, not agent-authored)
+      const typeFilters = filters?.type || ['decision', 'note', 'changeset', 'Decision', 'Note', 'ChangeSet', 'Changeset'];
 
       const response = await fetch('http://localhost:8105/v1/query', {
         method: 'POST',
@@ -110,8 +107,8 @@ export const useArtifacts = (filters?: ArtifactFilters) => {
       const payload = await response.json();
       const objects = extractObjects(payload);
 
-      // Filter and normalize artifacts
-      const artifactTypes = ['decision', 'filelog', 'note', 'changeset'];
+      // Filter and normalize artifacts (agent-authored only, no filelogs)
+      const artifactTypes = ['decision', 'note', 'changeset'];
       const normalized = objects
         .filter((obj: any) => {
           const objType = (obj.type || '').toLowerCase();
@@ -169,11 +166,10 @@ export const useArtifacts = (filters?: ArtifactFilters) => {
     }
   }, []);
 
-  // Get counts by type
+  // Get counts by type (agent-authored artifacts only)
   const getTypeCounts = useCallback(() => {
-    const counts: Record<ArtifactType, number> = {
+    const counts: Record<string, number> = {
       decision: 0,
-      filelog: 0,
       note: 0,
       changeset: 0
     };

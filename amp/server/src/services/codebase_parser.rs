@@ -82,7 +82,7 @@ impl CodebaseParser {
             ruby_language,
         })
     }
-    
+
     fn create_python_queries(&self) -> Result<CodeQueries> {
         let symbols_query = Query::new(
             self.python_language,
@@ -102,7 +102,7 @@ impl CodebaseParser {
                   name: (identifier) @method.name))) @method.definition
             "#,
         )?;
-        
+
         let imports_query = Query::new(
             self.python_language,
             r#"
@@ -116,7 +116,7 @@ impl CodebaseParser {
               name: (dotted_name) @import.name)
             "#,
         )?;
-        
+
         let exports_query = Query::new(
             self.python_language,
             r#"
@@ -127,14 +127,14 @@ impl CodebaseParser {
               name: (identifier) @export.name)
             "#,
         )?;
-        
+
         Ok(CodeQueries {
             symbols: symbols_query,
             imports: imports_query,
             exports: exports_query,
         })
     }
-    
+
     fn create_typescript_queries(&self) -> Result<CodeQueries> {
         let symbols_query = Query::new(
             self.typescript_language,
@@ -179,7 +179,7 @@ impl CodebaseParser {
                     name: (identifier) @import.name))))
             "#,
         )?;
-        
+
         let exports_query = Query::new(
             self.typescript_language,
             r#"
@@ -196,7 +196,7 @@ impl CodebaseParser {
                 name: (type_identifier) @export.name))
             "#,
         )?;
-        
+
         Ok(CodeQueries {
             symbols: symbols_query,
             imports: imports_query,
@@ -692,7 +692,7 @@ impl CodebaseParser {
 
     pub fn parse_codebase(&self, root_path: &Path) -> Result<HashMap<String, FileLog>> {
         let mut file_logs = HashMap::new();
-        
+
         for entry in WalkDir::new(root_path)
             .follow_links(false)
             .into_iter()
@@ -758,14 +758,14 @@ impl CodebaseParser {
                 }
             }
         }
-        
+
         Ok(file_logs)
     }
-    
+
     pub fn parse_file(&self, file_path: &Path, language: &str) -> Result<FileLog> {
         let content = std::fs::read_to_string(file_path)?;
         let content_hash = self.compute_hash(&content);
-        
+
         let mut parser = Parser::new();
         let queries = match language {
             "python" => {
@@ -813,7 +813,7 @@ impl CodebaseParser {
                 let mut hasher = Sha256::new();
                 hasher.update(&content);
                 let hash = format!("{:x}", hasher.finalize());
-                
+
                 return Ok(FileLog {
                     path: file_path.to_string_lossy().to_string(),
                     language: language.to_string(),
@@ -826,17 +826,21 @@ impl CodebaseParser {
                     },
                     recent_changes: Vec::new(),
                     linked_decisions: Vec::new(),
-                    notes: vec![format!("Language '{}' not yet supported for parsing", language)],
+                    notes: vec![format!(
+                        "Language '{}' not yet supported for parsing",
+                        language
+                    )],
                 });
             }
         };
-        
-        let tree = parser.parse(&content, None)
+
+        let tree = parser
+            .parse(&content, None)
             .ok_or_else(|| anyhow!("Failed to parse file: {}", file_path.display()))?;
-        
+
         let symbols = self.extract_symbols(&tree, &content, &queries, file_path, language)?;
         let dependencies = self.extract_dependencies(&tree, &content, &queries)?;
-        
+
         Ok(FileLog {
             path: file_path.to_string_lossy().to_string(),
             language: language.to_string(),
@@ -849,7 +853,7 @@ impl CodebaseParser {
             notes: Vec::new(),
         })
     }
-    
+
     fn extract_symbols(
         &self,
         tree: &Tree,
@@ -860,21 +864,25 @@ impl CodebaseParser {
     ) -> Result<Vec<ParsedSymbol>> {
         let mut cursor = QueryCursor::new();
         let mut symbols = Vec::new();
-        
+
         let matches = cursor.matches(&queries.symbols, tree.root_node(), content.as_bytes());
-        
+
         for m in matches {
             let mut symbol_name = String::new();
             let mut symbol_type = String::from("unknown");
             let mut node_for_position = None;
-            
+
             for capture in m.captures {
                 let node = capture.node;
                 let capture_name = &queries.symbols.capture_names()[capture.index as usize];
-                
+
                 if capture_name.ends_with(".name") {
                     // Extract the symbol type from the capture name (e.g., "function.name" -> "function")
-                    symbol_type = capture_name.split('.').next().unwrap_or("unknown").to_string();
+                    symbol_type = capture_name
+                        .split('.')
+                        .next()
+                        .unwrap_or("unknown")
+                        .to_string();
                     symbol_name = node.utf8_text(content.as_bytes())?.to_string();
                     node_for_position = Some(node);
                 } else if capture_name.ends_with(".definition") && node_for_position.is_none() {
@@ -882,7 +890,7 @@ impl CodebaseParser {
                     node_for_position = Some(node);
                 }
             }
-            
+
             if !symbol_name.is_empty() {
                 if let Some(pos_node) = node_for_position {
                     symbols.push(ParsedSymbol {
@@ -898,15 +906,20 @@ impl CodebaseParser {
                 }
             }
         }
-        
+
         Ok(symbols)
     }
-    
-    fn extract_dependencies(&self, tree: &Tree, content: &str, queries: &CodeQueries) -> Result<FileDependencies> {
+
+    fn extract_dependencies(
+        &self,
+        tree: &Tree,
+        content: &str,
+        queries: &CodeQueries,
+    ) -> Result<FileDependencies> {
         let mut cursor = QueryCursor::new();
         let mut imports = Vec::new();
         let mut exports = Vec::new();
-        
+
         // Extract imports
         let import_matches = cursor.matches(&queries.imports, tree.root_node(), content.as_bytes());
         for m in import_matches {
@@ -917,7 +930,7 @@ impl CodebaseParser {
                 }
             }
         }
-        
+
         // Extract exports
         let export_matches = cursor.matches(&queries.exports, tree.root_node(), content.as_bytes());
         for m in export_matches {
@@ -928,25 +941,28 @@ impl CodebaseParser {
                 }
             }
         }
-        
+
         Ok(FileDependencies { imports, exports })
     }
-    
+
     fn compute_hash(&self, content: &str) -> String {
         let mut hasher = Sha256::new();
         hasher.update(content.as_bytes());
         hex::encode(hasher.finalize())
     }
-    
+
     pub fn generate_file_log_markdown(&self, file_log: &FileLog) -> String {
         let mut markdown = String::new();
-        
+
         markdown.push_str("# FILE_LOG v1\n");
         markdown.push_str(&format!("path: {}\n", file_log.path));
         markdown.push_str(&format!("language: {}\n", file_log.language));
         markdown.push_str(&format!("last_indexed: {}\n", file_log.last_indexed));
-        markdown.push_str(&format!("content_hash: sha256:{}\n\n", file_log.content_hash));
-        
+        markdown.push_str(&format!(
+            "content_hash: sha256:{}\n\n",
+            file_log.content_hash
+        ));
+
         markdown.push_str("## Symbols\n");
         for symbol in &file_log.symbols {
             markdown.push_str(&format!(
@@ -958,7 +974,7 @@ impl CodebaseParser {
             ));
         }
         markdown.push('\n');
-        
+
         markdown.push_str("## Dependencies\n");
         markdown.push_str("imports:\n");
         for import in &file_log.dependencies.imports {
@@ -969,38 +985,48 @@ impl CodebaseParser {
             markdown.push_str(&format!("- {}\n", export));
         }
         markdown.push('\n');
-        
+
         markdown.push_str("## Recent Changes\n");
         for change in &file_log.recent_changes {
             markdown.push_str(&format!("- {}\n", change));
         }
         markdown.push('\n');
-        
+
         markdown.push_str("## Linked Decisions\n");
         for decision in &file_log.linked_decisions {
             markdown.push_str(&format!("- {}\n", decision));
         }
         markdown.push('\n');
-        
+
         markdown.push_str("## Notes\n");
         for note in &file_log.notes {
             markdown.push_str(&format!("- {}\n", note));
         }
-        
+
         markdown
     }
 
-    pub fn chunk_file_content(&self, content: &str, language: &str) -> Vec<super::chunking::ChunkData> {
+    pub fn chunk_file_content(
+        &self,
+        content: &str,
+        language: &str,
+    ) -> Vec<super::chunking::ChunkData> {
         let chunking_service = super::chunking::ChunkingService::new();
         chunking_service.chunk_file(content, language)
     }
 
-    pub fn generate_filelog_summary(&self, file_path: &str, symbols: &[ParsedSymbol], language: &str) -> (String, Vec<String>, Vec<String>) {
+    pub fn generate_filelog_summary(
+        &self,
+        file_path: &str,
+        symbols: &[ParsedSymbol],
+        language: &str,
+    ) -> (String, Vec<String>, Vec<String>) {
         let filelog_gen = super::filelog_generator::FileLogGenerator::new();
-        
+
         // Convert ParsedSymbol to Symbol for the generator
-        let mock_symbols: Vec<crate::models::Symbol> = symbols.iter().map(|ps| {
-            crate::models::Symbol {
+        let mock_symbols: Vec<crate::models::Symbol> = symbols
+            .iter()
+            .map(|ps| crate::models::Symbol {
                 base: crate::models::BaseObject {
                     id: uuid::Uuid::new_v4(),
                     object_type: crate::models::ObjectType::Symbol,
@@ -1031,8 +1057,8 @@ impl CodebaseParser {
                 content_hash: None,
                 signature: None,
                 documentation: None,
-            }
-        }).collect();
+            })
+            .collect();
 
         let summary = filelog_gen.generate_summary(file_path, &mock_symbols, language);
         let key_symbols = filelog_gen.extract_key_symbols(&mock_symbols);
@@ -1046,14 +1072,16 @@ impl CodebaseParser {
 mod tests {
     use super::*;
     use tempfile;
-    
+
     #[test]
     fn test_parse_python_file() {
         let parser = CodebaseParser::new().unwrap();
-        
+
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.py");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 def hello_world():
     print("Hello, world!")
 
@@ -1063,22 +1091,26 @@ class MyClass:
 
 import os
 from typing import List
-"#).unwrap();
-        
+"#,
+        )
+        .unwrap();
+
         let file_log = parser.parse_file(&file_path, "python").unwrap();
-        
+
         assert_eq!(file_log.language, "python");
         assert!(file_log.symbols.len() >= 3); // function, class, method
         assert!(file_log.dependencies.imports.len() >= 1);
     }
-    
+
     #[test]
     fn test_parse_typescript_file() {
         let parser = CodebaseParser::new().unwrap();
-        
+
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.ts");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 import { Component } from 'react';
 
 interface User {
@@ -1095,35 +1127,35 @@ class UserComponent extends Component {
 export function createUser(name: string): User {
     return { name, age: 0 };
 }
-"#).unwrap();
-        
+"#,
+        )
+        .unwrap();
+
         let file_log = parser.parse_file(&file_path, "typescript").unwrap();
-        
+
         assert_eq!(file_log.language, "typescript");
         assert!(file_log.symbols.len() >= 3); // interface, class, function
     }
-    
+
     #[test]
     fn test_generate_markdown() {
         let parser = CodebaseParser::new().unwrap();
-        
+
         let file_log = FileLog {
             path: "test.py".to_string(),
             language: "python".to_string(),
             last_indexed: "2026-01-17T10:00:00Z".to_string(),
             content_hash: "abc123".to_string(),
-            symbols: vec![
-                ParsedSymbol {
-                    name: "hello".to_string(),
-                    symbol_type: "function".to_string(),
-                    start_line: 0,
-                    end_line: 2,
-                    start_byte: 0,
-                    end_byte: 30,
-                    file_path: "test.py".to_string(),
-                    language: "python".to_string(),
-                }
-            ],
+            symbols: vec![ParsedSymbol {
+                name: "hello".to_string(),
+                symbol_type: "function".to_string(),
+                start_line: 0,
+                end_line: 2,
+                start_byte: 0,
+                end_byte: 30,
+                file_path: "test.py".to_string(),
+                language: "python".to_string(),
+            }],
             dependencies: FileDependencies {
                 imports: vec!["os".to_string()],
                 exports: vec!["hello".to_string()],
@@ -1132,9 +1164,9 @@ export function createUser(name: string): User {
             linked_decisions: vec!["dec_001".to_string()],
             notes: vec!["Main entry point".to_string()],
         };
-        
+
         let markdown = parser.generate_file_log_markdown(&file_log);
-        
+
         assert!(markdown.contains("# FILE_LOG v1"));
         assert!(markdown.contains("path: test.py"));
         assert!(markdown.contains("## Symbols"));
@@ -1147,7 +1179,9 @@ export function createUser(name: string): User {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.js");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 import { useState } from 'react';
 
 function greet(name) {
@@ -1161,7 +1195,9 @@ class Calculator {
 }
 
 export const PI = 3.14159;
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "javascript").unwrap();
 
@@ -1176,7 +1212,9 @@ export const PI = 3.14159;
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.rs");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 use std::collections::HashMap;
 
 fn main() {
@@ -1200,7 +1238,9 @@ pub enum Direction {
     East,
     West,
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "rust").unwrap();
 
@@ -1215,7 +1255,9 @@ pub enum Direction {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.go");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 package main
 
 import "fmt"
@@ -1236,7 +1278,9 @@ func (u *User) Greet() string {
 type Greeter interface {
     Greet() string
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "go").unwrap();
 
@@ -1251,7 +1295,9 @@ type Greeter interface {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.cs");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 using System;
 using System.Collections.Generic;
 
@@ -1278,7 +1324,9 @@ namespace MyApp
         Divide
     }
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "csharp").unwrap();
 
@@ -1293,7 +1341,9 @@ namespace MyApp
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("Test.java");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 package com.example;
 
 import java.util.List;
@@ -1318,7 +1368,9 @@ interface Computable {
 enum Operation {
     ADD, SUBTRACT, MULTIPLY, DIVIDE
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "java").unwrap();
 
@@ -1333,7 +1385,9 @@ enum Operation {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.c");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 #include <stdio.h>
 #include "myheader.h"
 
@@ -1356,7 +1410,9 @@ int main() {
     printf("Hello, World!\n");
     return 0;
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "c").unwrap();
 
@@ -1371,7 +1427,9 @@ int main() {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.cpp");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 #include <iostream>
 #include <vector>
 
@@ -1401,7 +1459,9 @@ int main() {
     std::cout << "Hello, World!" << std::endl;
     return 0;
 }
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "cpp").unwrap();
 
@@ -1416,7 +1476,9 @@ int main() {
 
         let dir = tempfile::tempdir().unwrap();
         let file_path = dir.path().join("test.rb");
-        std::fs::write(&file_path, r#"
+        std::fs::write(
+            &file_path,
+            r#"
 require 'json'
 require_relative 'helper'
 
@@ -1441,7 +1503,9 @@ end
 def greet(name)
   puts "Hello, #{name}!"
 end
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let file_log = parser.parse_file(&file_path, "ruby").unwrap();
 

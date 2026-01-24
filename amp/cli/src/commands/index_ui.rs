@@ -191,10 +191,12 @@ pub fn start_index_ui(
                     .constraints([Constraint::Length(3), Constraint::Min(0)])
                     .split(body[0]);
 
-                let progress_ratio = if snapshot.supported_files == 0 {
-                    0.0
-                } else {
+                let progress_ratio = if snapshot.supported_files > 0 {
                     snapshot.processed_files as f64 / snapshot.supported_files as f64
+                } else if snapshot.total_files > 0 {
+                    snapshot.supported_files as f64 / snapshot.total_files as f64
+                } else {
+                    0.0
                 };
 
                 let progress = Gauge::default()

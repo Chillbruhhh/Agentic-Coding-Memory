@@ -1,10 +1,13 @@
+use crate::{
+    surreal_json::{take_json_value, take_json_values},
+    AppState,
+};
 use axum::{extract::State, http::StatusCode, response::Json};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use chrono::Utc;
-use tokio::time::{timeout, Duration};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::{surreal_json::{take_json_value, take_json_values}, AppState};
+use tokio::time::{timeout, Duration};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct LeaseRequest {
@@ -34,17 +37,14 @@ pub async fn acquire_lease(
 ) -> Result<(StatusCode, Json<LeaseResponse>), StatusCode> {
     let lease_id = Uuid::new_v4();
     let ttl_seconds = request.duration.unwrap_or(300); // Default 5 minutes
-    
+
     // Check for existing lease on this resource
     let query = format!(
         "SELECT * FROM leases WHERE resource = '{}' AND expires_at > time::now()",
         request.resource.replace("'", "\\'") // Escape single quotes
     );
-    
-    let check_result = timeout(
-        Duration::from_secs(5),
-        state.db.client.query(query)
-    ).await;
+
+    let check_result = timeout(Duration::from_secs(5), state.db.client.query(query)).await;
 
     match check_result {
         Ok(Ok(mut response)) => {
@@ -72,17 +72,24 @@ pub async fn acquire_lease(
 
     let create_result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client
+        state
+            .db
+            .client
             .query(create_query)
             .bind(("resource", request.resource.clone()))
             .bind(("holder", request.agent_id.clone()))
             .bind(("created_at", now.timestamp()))
-            .bind(("expires_at", expires_at.timestamp()))
-    ).await;
+            .bind(("expires_at", expires_at.timestamp())),
+    )
+    .await;
 
     match create_result {
         Ok(Ok(_)) => {
-            tracing::info!("Lease acquired: {} by {}", request.resource, request.agent_id);
+            tracing::info!(
+                "Lease acquired: {} by {}",
+                request.resource,
+                request.agent_id
+            );
             Ok((
                 StatusCode::CREATED,
                 Json(LeaseResponse {
@@ -110,16 +117,15 @@ pub async fn release_lease(
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     // Delete without RETURN to avoid serialization issues
     let query = format!("DELETE leases:`{}`", request.lease_id);
-    let result: Result<Result<surrealdb::Response, _>, _> = timeout(
-        Duration::from_secs(5),
-        state.db.client.query(query)
-    )
-    .await;
+    let result: Result<Result<surrealdb::Response, _>, _> =
+        timeout(Duration::from_secs(5), state.db.client.query(query)).await;
 
     match result {
         Ok(Ok(_)) => {
             tracing::info!("Lease released: {}", request.lease_id);
-            Ok(Json(serde_json::json!({"success": true, "message": "Lease released"})))
+            Ok(Json(
+                serde_json::json!({"success": true, "message": "Lease released"}),
+            ))
         }
         Ok(Err(e)) => {
             tracing::error!("Failed to release lease {}: {}", request.lease_id, e);
@@ -144,12 +150,16 @@ pub async fn renew_lease(
     Json(request): Json<RenewRequest>,
 ) -> Result<(StatusCode, Json<LeaseResponse>), StatusCode> {
     let ttl_seconds = request.duration.unwrap_or(300);
-    
+
     // Get existing lease
     let query = "SELECT * FROM type::record('leases', $lease_id)";
     let get_result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client.query(query).bind(("lease_id", request.lease_id)),
+        state
+            .db
+            .client
+            .query(query)
+            .bind(("lease_id", request.lease_id)),
     )
     .await;
 
@@ -172,11 +182,13 @@ pub async fn renew_lease(
     };
 
     // Extract resource and holder
-    let resource = lease_data.get("resource")
+    let resource = lease_data
+        .get("resource")
         .and_then(|v| v.as_str())
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
-    let holder = lease_data.get("holder")
+    let holder = lease_data
+        .get("holder")
         .and_then(|v| v.as_str())
         .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
         .to_string();
@@ -189,22 +201,30 @@ pub async fn renew_lease(
     let delete_query = "DELETE type::record('leases', $lease_id)";
     let _delete_result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client.query(delete_query).bind(("lease_id", request.lease_id))
-    ).await;
+        state
+            .db
+            .client
+            .query(delete_query)
+            .bind(("lease_id", request.lease_id)),
+    )
+    .await;
 
     // Create new lease with same ID and updated expiration
     let create_query = "CREATE type::record('leases', $lease_id) CONTENT { resource: $resource, holder: $holder, created_at: time::from::unix($created_at), expires_at: time::from::unix($expires_at) }";
 
     let create_result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client
+        state
+            .db
+            .client
             .query(create_query)
             .bind(("lease_id", request.lease_id))
             .bind(("resource", resource.clone()))
             .bind(("holder", holder.clone()))
             .bind(("created_at", now.timestamp()))
-            .bind(("expires_at", expires_at.timestamp()))
-    ).await;
+            .bind(("expires_at", expires_at.timestamp())),
+    )
+    .await;
 
     match create_result {
         Ok(Ok(_)) => {

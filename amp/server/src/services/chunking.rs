@@ -1,4 +1,4 @@
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone)]
 pub struct ChunkData {
@@ -18,7 +18,15 @@ impl ChunkingService {
     pub fn new() -> Self {
         Self {
             chunk_size: 500,
-            overlap_size: 50,
+            overlap_size: 100, // 100-token overlap for better retrieval
+        }
+    }
+
+    /// Create with custom settings
+    pub fn with_settings(chunk_size: usize, overlap_size: usize) -> Self {
+        Self {
+            chunk_size,
+            overlap_size,
         }
     }
 
@@ -49,7 +57,8 @@ impl ChunkingService {
             let chunk_tokens = &tokens[start_idx..end_idx];
             let chunk_content = chunk_tokens.join(" ");
 
-            let (start_line, end_line) = self.estimate_line_range(content, start_idx, end_idx, &tokens);
+            let (start_line, end_line) =
+                self.estimate_line_range(content, start_idx, end_idx, &tokens);
 
             chunks.push(ChunkData {
                 content: chunk_content.clone(),
@@ -79,13 +88,28 @@ impl ChunkingService {
         format!("{:x}", hasher.finalize())
     }
 
-    fn estimate_line_range(&self, content: &str, start_token: usize, end_token: usize, tokens: &[&str]) -> (u32, u32) {
-        let start_pos = tokens[..start_token].iter().map(|t| t.len() + 1).sum::<usize>();
-        let end_pos = tokens[..end_token].iter().map(|t| t.len() + 1).sum::<usize>();
-        
-        let start_line = content[..start_pos.min(content.len())].lines().count().max(1) as u32;
+    fn estimate_line_range(
+        &self,
+        content: &str,
+        start_token: usize,
+        end_token: usize,
+        tokens: &[&str],
+    ) -> (u32, u32) {
+        let start_pos = tokens[..start_token]
+            .iter()
+            .map(|t| t.len() + 1)
+            .sum::<usize>();
+        let end_pos = tokens[..end_token]
+            .iter()
+            .map(|t| t.len() + 1)
+            .sum::<usize>();
+
+        let start_line = content[..start_pos.min(content.len())]
+            .lines()
+            .count()
+            .max(1) as u32;
         let end_line = content[..end_pos.min(content.len())].lines().count().max(1) as u32;
-        
+
         (start_line, end_line)
     }
 }

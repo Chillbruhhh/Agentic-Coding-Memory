@@ -32,6 +32,13 @@ export const KnowledgeGraph: React.FC = () => {
   const [fileLogError, setFileLogError] = useState<string | null>(null);
   const [layoutKey, setLayoutKey] = useState(0);
 
+  const normalizeId = (value: string) =>
+    value
+      .replace(/^objects:/, '')
+      .replace(/[âŸ¨âŸ©]/g, '')
+      .replace(/[`]/g, '')
+      .replace(/[\u27E8\u27E9]/g, '');
+
   // Transform codebase data to graph format
   const graphData = useMemo(() => {
     if (!objects || objects.length === 0) {
@@ -41,6 +48,24 @@ export const KnowledgeGraph: React.FC = () => {
     // Use the actual AMP objects directly
     return transformAmpToGraph(objects, relationships);
   }, [objects, relationships]);
+
+  const objectById = useMemo(() => {
+    const map = new Map<string, any>();
+    objects.forEach(obj => {
+      if (obj?.id) {
+        map.set(normalizeId(obj.id), obj);
+      }
+    });
+    return map;
+  }, [objects]);
+
+  const nodeById = useMemo(() => {
+    const map = new Map<string, GraphNode>();
+    graphData.nodes.forEach(node => {
+      map.set(node.id, node);
+    });
+    return map;
+  }, [graphData.nodes]);
 
   // Calculate highlighted node IDs based on search and type filters
   // We keep ALL nodes in the graph but highlight matching ones
@@ -104,7 +129,7 @@ export const KnowledgeGraph: React.FC = () => {
   }, [visibleTypes.join('|')]);
 
   useEffect(() => {
-    if (!selectedNode || !['file', 'directory'].includes(selectedNode.kind)) {
+    if (!selectedNode || !['file', 'directory', 'project'].includes(selectedNode.kind)) {
       setFileLogMarkdown(null);
       setFileLogNotes(null);
       setFileLogError(null);
@@ -117,8 +142,13 @@ export const KnowledgeGraph: React.FC = () => {
       setFileLogLoading(true);
       setFileLogError(null);
       try {
-        const path = selectedNode.path || selectedNode.name;
-        const response = await fetch(`http://localhost:8105/v1/codebase/file-log-objects/${encodeURIComponent(path)}`);
+        const lookup = selectedNode.kind === 'project'
+          ? selectedNode.id
+          : (selectedNode.path || selectedNode.name);
+        if (selectedNode.kind === 'project' && (!lookup || lookup === '.')) {
+          throw new Error('Project root path unavailable. Reindex to store an absolute path.');
+        }
+        const response = await fetch(`http://localhost:8105/v1/codebase/file-log-objects/${encodeURIComponent(lookup)}`);
         if (!response.ok) {
           throw new Error(`Failed to load file log (${response.status})`);
         }
@@ -147,6 +177,33 @@ export const KnowledgeGraph: React.FC = () => {
       isMounted = false;
     };
   }, [selectedNode]);
+
+  const selectedObject = selectedNode ? objectById.get(selectedNode.id) : null;
+  const selectedKind = selectedNode?.kind?.toLowerCase();
+  const isFileNode = !!selectedKind && ['file', 'directory', 'project'].includes(selectedKind);
+  const isArtifactNode = !!selectedKind && ['note', 'decision', 'changeset', 'filelog'].includes(selectedKind);
+
+  const linkedFileNodes = useMemo(() => {
+    if (!selectedNode) return [];
+    return relationships
+      .filter(rel =>
+        (rel.in === selectedNode.id || rel.out === selectedNode.id)
+      )
+      .map(rel => {
+        const otherId = rel.in === selectedNode.id ? rel.out : rel.in;
+        return nodeById.get(otherId);
+      })
+      .filter((node): node is GraphNode => !!node && node.kind?.toLowerCase() === 'file');
+  }, [selectedNode, relationships, nodeById]);
+
+  const isAttachedToArtifactCore = useMemo(() => {
+    if (!selectedNode) return false;
+    return relationships.some(rel => {
+      const otherId = rel.in === selectedNode.id ? rel.out : rel.in;
+      const otherNode = nodeById.get(otherId);
+      return otherNode?.kind?.toLowerCase() === 'artifact_core';
+    });
+  }, [selectedNode, relationships, nodeById]);
 
   if (loading) {
     return (
@@ -234,7 +291,75 @@ export const KnowledgeGraph: React.FC = () => {
           )}
 
           <div className="mt-4 pt-4 border-t border-border-dark flex-1 min-h-0 flex flex-col">
-            {['file', 'directory'].includes(selectedNode.kind) ? (
+            {isArtifactNode ? (
+              <div className="flex-1 min-h-0 overflow-auto pr-2 space-y-4 text-xs text-slate-300">
+                <div>
+                  <div className="uppercase tracking-[0.2em] text-[10px] text-primary/80">Artifact</div>
+                  <div className="text-sm text-slate-100 mt-1">{selectedObject?.title || selectedNode.name}</div>
+                  <div className="text-[11px] text-slate-400 mt-1">{selectedKind}</div>
+                </div>
+
+                {(selectedObject?.summary || selectedObject?.description || selectedObject?.content || selectedObject?.decision || selectedObject?.diff_summary || selectedObject?.context) && (
+                  <div>
+                    <div className="uppercase tracking-wider text-[10px] text-slate-500">Details</div>
+                    <div className="mt-1 whitespace-pre-wrap text-slate-200">
+                      {selectedObject?.summary ||
+                        selectedObject?.description ||
+                        selectedObject?.content ||
+                        selectedObject?.decision ||
+                        selectedObject?.diff_summary ||
+                        selectedObject?.context}
+                    </div>
+                  </div>
+                )}
+
+                {Array.isArray(selectedObject?.tags) && selectedObject.tags.length > 0 && (
+                  <div>
+                    <div className="uppercase tracking-wider text-[10px] text-slate-500">Tags</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {selectedObject.tags.map((tag: string) => (
+                        <span
+                          key={tag}
+                          className="text-[10px] bg-primary/10 text-primary border border-primary/30 px-2 py-0.5 rounded-full uppercase tracking-wider"
+                        >
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selectedObject?.created_at && (
+                  <div>
+                    <div className="uppercase tracking-wider text-[10px] text-slate-500">Created</div>
+                    <div className="mt-1 font-mono text-[11px] text-slate-300">{selectedObject.created_at}</div>
+                  </div>
+                )}
+
+                {linkedFileNodes.length > 0 ? (
+                  <div>
+                    <div className="uppercase tracking-wider text-[10px] text-slate-500">Linked Files</div>
+                    <div className="mt-2 space-y-2">
+                      {linkedFileNodes.map(fileNode => (
+                        <div key={fileNode.id} className="flex items-start justify-between gap-2">
+                          <div className="font-mono text-[11px] text-slate-200 break-all">{fileNode.path || fileNode.name}</div>
+                          <button
+                            onClick={() => setSelectedNode(fileNode)}
+                            className="text-[10px] text-primary hover:text-primary/80 border border-primary/30 px-2 py-0.5 rounded uppercase tracking-wider"
+                          >
+                            Focus
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-slate-400">
+                    {isAttachedToArtifactCore ? 'Attached to artifact_core.' : 'No linked files.'}
+                  </div>
+                )}
+              </div>
+            ) : isFileNode ? (
               <>
                 <div className="text-xs uppercase tracking-[0.2em] text-primary mb-3">File Log</div>
                 {fileLogNotes && (
@@ -275,7 +400,7 @@ export const KnowledgeGraph: React.FC = () => {
               </>
             ) : (
               <div className="text-xs text-slate-400">
-                Select a file or directory node to view its file log.
+                Select a file, directory, project, or artifact node to view details.
               </div>
             )}
           </div>

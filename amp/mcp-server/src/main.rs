@@ -1,8 +1,11 @@
 use anyhow::Result;
-use rmcp::ServerHandler;
-use rmcp::service::{RequestContext, ServiceExt, RoleServer};
-use rmcp::model::{ServerInfo, ServerCapabilities, Implementation, ProtocolVersion, CallToolRequestParam, CallToolResult};
+use rmcp::model::{
+    CallToolRequestParam, CallToolResult, Implementation, ProtocolVersion, ServerCapabilities,
+    ServerInfo,
+};
+use rmcp::service::{RequestContext, RoleServer, ServiceExt};
 use rmcp::ErrorData as McpError;
+use rmcp::ServerHandler;
 use std::sync::Arc;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -34,7 +37,9 @@ impl ServerHandler for AmpMcpHandler {
                 title: None,
                 website_url: None,
             },
-            instructions: Some("AMP MCP Server - Exposes Agentic Memory Protocol tools for AI agents".to_string()),
+            instructions: Some(
+                "AMP MCP Server - Exposes Agentic Memory Protocol tools for AI agents".to_string(),
+            ),
         }
     }
 
@@ -47,24 +52,30 @@ impl ServerHandler for AmpMcpHandler {
         use std::sync::Arc;
 
         // Helper to convert schema to Arc<Map> (schemars 1.0 API)
-        let to_schema = |schema: schemars::Schema| -> Arc<serde_json::Map<String, serde_json::Value>> {
-            let value = serde_json::to_value(schema).unwrap();
-            if let Some(obj) = value.as_object() {
-                Arc::new(obj.clone())
-            } else {
-                // Fallback to empty object schema
-                let mut map = serde_json::Map::new();
-                map.insert("type".to_string(), serde_json::Value::String("object".to_string()));
-                Arc::new(map)
-            }
-        };
+        let to_schema =
+            |schema: schemars::Schema| -> Arc<serde_json::Map<String, serde_json::Value>> {
+                let value = serde_json::to_value(schema).unwrap();
+                if let Some(obj) = value.as_object() {
+                    Arc::new(obj.clone())
+                } else {
+                    // Fallback to empty object schema
+                    let mut map = serde_json::Map::new();
+                    map.insert(
+                        "type".to_string(),
+                        serde_json::Value::String("object".to_string()),
+                    );
+                    Arc::new(map)
+                }
+            };
 
         Ok(rmcp::model::ListToolsResult {
             tools: vec![
                 Tool {
                     name: "amp_status".into(),
                     description: Some("Get AMP server health and analytics".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::discovery::AmpStatusInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::discovery::AmpStatusInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -113,28 +124,12 @@ impl ServerHandler for AmpMcpHandler {
                 },
                 Tool {
                     name: "amp_write_artifact".into(),
-                    description: Some("Write artifact to graph, vector, and temporal layers".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpWriteArtifactInput)),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_write_decision".into(),
-                    description: Some("Create an architectural decision record".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpWriteDecisionInput)),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_write_changeset".into(),
-                    description: Some("Document a completed work unit".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpWriteChangesetInput)),
+                    description: Some(
+                        "Write artifact (decision, changeset, note, filelog) to all memory layers with graph relationships".into(),
+                    ),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::memory::AmpWriteArtifactInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -164,7 +159,9 @@ impl ServerHandler for AmpMcpHandler {
                 Tool {
                     name: "amp_filelog_get".into(),
                     description: Some("Get file log with symbols and dependencies".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::files::AmpFilelogGetInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::files::AmpFilelogGetInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -172,9 +169,26 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
+                    name: "amp_file_sync".into(),
+                    description: Some(
+                        "Sync file state across all memory layers (temporal, vector, graph) after create/edit/delete".into(),
+                    ),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::files::AmpFileSyncInput
+                    )),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                // Legacy tool kept for backward compatibility
+                Tool {
                     name: "amp_filelog_update".into(),
-                    description: Some("Update file log after changes".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::files::AmpFilelogUpdateInput)),
+                    description: Some("Update file log after changes (legacy - use amp_file_sync)".into()),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::files::AmpFilelogUpdateInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -184,7 +198,9 @@ impl ServerHandler for AmpMcpHandler {
                 Tool {
                     name: "amp_file_content_get".into(),
                     description: Some("Get stored file content from indexed chunks".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::files::AmpFileContentGetInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::files::AmpFileContentGetInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -194,7 +210,9 @@ impl ServerHandler for AmpMcpHandler {
                 Tool {
                     name: "amp_file_path_resolve".into(),
                     description: Some("Resolve canonical stored path for a file input".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::files::AmpFilePathResolveInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::files::AmpFilePathResolveInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -204,7 +222,9 @@ impl ServerHandler for AmpMcpHandler {
                 Tool {
                     name: "amp_lease_acquire".into(),
                     description: Some("Acquire a resource lease for coordination".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::coordination::AmpLeaseAcquireInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::coordination::AmpLeaseAcquireInput
+                    )),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -214,7 +234,61 @@ impl ServerHandler for AmpMcpHandler {
                 Tool {
                     name: "amp_lease_release".into(),
                     description: Some("Release a resource lease".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::coordination::AmpLeaseReleaseInput)),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::coordination::AmpLeaseReleaseInput
+                    )),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
+                    name: "amp_cache_write".into(),
+                    description: Some(
+                        "Write to episodic cache (fact/decision/snippet/warning). Auto-closes block at ~1800 tokens.".into(),
+                    ),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::cache::AmpCacheWriteInput
+                    )),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
+                    name: "amp_cache_compact".into(),
+                    description: Some(
+                        "Close current cache block and open new one (call on conversation compact)".into(),
+                    ),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::cache::AmpCacheCompactInput
+                    )),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
+                    name: "amp_cache_search".into(),
+                    description: Some(
+                        "Search cache blocks by summary (returns top 5 block summaries for two-phase retrieval)".into(),
+                    ),
+                    input_schema: to_schema(schemars::schema_for!(
+                        tools::cache::AmpCacheSearchInput
+                    )),
+                    annotations: None,
+                    icons: None,
+                    meta: None,
+                    title: None,
+                    output_schema: None,
+                },
+                Tool {
+                    name: "amp_cache_get".into(),
+                    description: Some("Get specific cache block by ID or current open block".into()),
+                    input_schema: to_schema(schemars::schema_for!(tools::cache::AmpCacheGetInput)),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -236,103 +310,163 @@ impl ServerHandler for AmpMcpHandler {
 
         // Helper to convert errors - use String directly
         let to_internal_error = |e: anyhow::Error| McpError::internal_error(e.to_string(), None);
-        let to_invalid_params = |e: serde_json::Error| McpError::invalid_params(e.to_string(), None);
+        let to_invalid_params =
+            |e: serde_json::Error| McpError::invalid_params(e.to_string(), None);
 
         let contents = match params.name.as_ref() {
-            "amp_status" => {
-                tools::discovery::handle_amp_status(client).await.map_err(to_internal_error)?
-            }
+            "amp_status" => tools::discovery::handle_amp_status(client)
+                .await
+                .map_err(to_internal_error)?,
             "amp_list" => {
                 let input: tools::discovery::AmpListInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::discovery::handle_amp_list(client, input).await.map_err(to_internal_error)?
+                tools::discovery::handle_amp_list(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_context" => {
                 let input: tools::context::AmpContextInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::context::handle_amp_context(client, input).await.map_err(to_internal_error)?
+                tools::context::handle_amp_context(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_query" => {
                 let input: tools::query::AmpQueryInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::query::handle_amp_query(client, input).await.map_err(to_internal_error)?
+                tools::query::handle_amp_query(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_trace" => {
                 let input: tools::query::AmpTraceInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::query::handle_amp_trace(client, input).await.map_err(to_internal_error)?
-            }
-            "amp_write_decision" => {
-                let input: tools::memory::AmpWriteDecisionInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::memory::handle_write_decision(client, input).await.map_err(to_internal_error)?
+                tools::query::handle_amp_trace(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_write_artifact" => {
                 let input: tools::memory::AmpWriteArtifactInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::memory::handle_write_artifact(client, input).await.map_err(to_internal_error)?
-            }
-            "amp_write_changeset" => {
-                let input: tools::memory::AmpWriteChangesetInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::memory::handle_write_changeset(client, input).await.map_err(to_internal_error)?
+                tools::memory::handle_write_artifact(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_run_start" => {
                 let input: tools::memory::AmpRunStartInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::memory::handle_run_start(client, input).await.map_err(to_internal_error)?
+                tools::memory::handle_run_start(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_run_end" => {
                 let input: tools::memory::AmpRunEndInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::memory::handle_run_end(client, input).await.map_err(to_internal_error)?
+                tools::memory::handle_run_end(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_filelog_get" => {
                 let input: tools::files::AmpFilelogGetInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::files::handle_filelog_get(client, input).await.map_err(to_internal_error)?
+                tools::files::handle_filelog_get(client, input)
+                    .await
+                    .map_err(to_internal_error)?
+            }
+            "amp_file_sync" => {
+                let input: tools::files::AmpFileSyncInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::files::handle_file_sync(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_filelog_update" => {
                 let input: tools::files::AmpFilelogUpdateInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::files::handle_filelog_update(client, input).await.map_err(to_internal_error)?
+                tools::files::handle_filelog_update(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_file_content_get" => {
                 let input: tools::files::AmpFileContentGetInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::files::handle_file_content_get(client, input).await.map_err(to_internal_error)?
+                tools::files::handle_file_content_get(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_file_path_resolve" => {
                 let input: tools::files::AmpFilePathResolveInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::files::handle_file_path_resolve(client, input).await.map_err(to_internal_error)?
+                tools::files::handle_file_path_resolve(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_lease_acquire" => {
                 let input: tools::coordination::AmpLeaseAcquireInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::coordination::handle_lease_acquire(client, input).await.map_err(to_internal_error)?
+                tools::coordination::handle_lease_acquire(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
             "amp_lease_release" => {
                 let input: tools::coordination::AmpLeaseReleaseInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::coordination::handle_lease_release(client, input).await.map_err(to_internal_error)?
+                tools::coordination::handle_lease_release(client, input)
+                    .await
+                    .map_err(to_internal_error)?
             }
-            _ => return Err(McpError::invalid_request(format!("Unknown tool: {}", params.name), None))
+            "amp_cache_write" => {
+                let input: tools::cache::AmpCacheWriteInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::cache::handle_cache_write(client, input)
+                    .await
+                    .map_err(to_internal_error)?
+            }
+            "amp_cache_compact" => {
+                let input: tools::cache::AmpCacheCompactInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::cache::handle_cache_compact(client, input)
+                    .await
+                    .map_err(to_internal_error)?
+            }
+            "amp_cache_search" => {
+                let input: tools::cache::AmpCacheSearchInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::cache::handle_cache_search(client, input)
+                    .await
+                    .map_err(to_internal_error)?
+            }
+            "amp_cache_get" => {
+                let input: tools::cache::AmpCacheGetInput =
+                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
+                        .map_err(to_invalid_params)?;
+                tools::cache::handle_cache_get(client, input)
+                    .await
+                    .map_err(to_internal_error)?
+            }
+            _ => {
+                return Err(McpError::invalid_request(
+                    format!("Unknown tool: {}", params.name),
+                    None,
+                ))
+            }
         };
 
         Ok(CallToolResult::success(contents))
@@ -360,13 +494,14 @@ async fn run_stdio_transport(handler: AmpMcpHandler) -> Result<()> {
 
 async fn run_http_transport(handler: AmpMcpHandler, port: u16) -> Result<()> {
     use rmcp::transport::streamable_http_server::{
-        StreamableHttpService,
-        StreamableHttpServerConfig,
-        session::local::LocalSessionManager,
+        session::local::LocalSessionManager, StreamableHttpServerConfig, StreamableHttpService,
     };
     use std::sync::Arc;
 
-    tracing::info!("Starting MCP server with Streamable HTTP transport on port {}", port);
+    tracing::info!(
+        "Starting MCP server with Streamable HTTP transport on port {}",
+        port
+    );
 
     // Create session manager for handling multiple client sessions
     let session_manager = Arc::new(LocalSessionManager::default());
@@ -378,15 +513,11 @@ async fn run_http_transport(handler: AmpMcpHandler, port: u16) -> Result<()> {
     let handler_clone = handler.clone();
 
     // Create the streamable HTTP service with a factory function
-    let service = StreamableHttpService::new(
-        move || Ok(handler_clone.clone()),
-        session_manager,
-        config,
-    );
+    let service =
+        StreamableHttpService::new(move || Ok(handler_clone.clone()), session_manager, config);
 
     // Create the axum router with the service
-    let app = axum::Router::new()
-        .route("/mcp", axum::routing::any_service(service));
+    let app = axum::Router::new().route("/mcp", axum::routing::any_service(service));
 
     // Bind and serve
     let addr = format!("0.0.0.0:{}", port);

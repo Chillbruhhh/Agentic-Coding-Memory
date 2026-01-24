@@ -41,8 +41,12 @@ export interface GraphEdge {
   type: string;
 }
 
-// Artifact types - created by agents during work
-export type ArtifactType = 'decision' | 'filelog' | 'note' | 'changeset';
+// Artifact types - agent-authored knowledge (decisions, notes, changesets)
+// Note: filelogs are indexer output, not agent-authored artifacts
+export type ArtifactType = 'decision' | 'note' | 'changeset';
+
+// All object types including infrastructure (filelogs)
+export type ObjectType = ArtifactType | 'filelog';
 
 // Memory layer indicators for artifacts
 export interface MemoryLayers {
@@ -75,17 +79,22 @@ export interface DecisionArtifact extends ArtifactBase {
   linked_files?: string[];   // Files affected by this decision
 }
 
-// FileLog artifact - summary per file
-export interface FileLogArtifact extends ArtifactBase {
+// FileLog - indexer output, not an agent-authored artifact
+// Kept separate from ArtifactBase since it's infrastructure data
+export interface FileLog {
+  id: string;
   type: 'filelog';
+  title: string;
   file_path: string;
   summary: string;           // High-level summary of the file
   symbols?: string[];        // Key symbols/functions in file
   dependencies?: string[];   // Files this depends on
-  last_modified_by?: string; // Agent that last modified
+  created_at: string;
+  updated_at: string;
+  project_id?: string;
+  tags?: string[];
   change_history?: {
     timestamp: string;
-    agent_id: string;
     description: string;
   }[];
 }
@@ -107,8 +116,8 @@ export interface ChangeSetArtifact extends ArtifactBase {
   linked_decisions?: string[]; // Decision IDs that justified this change
 }
 
-// Union type for all artifacts
-export type Artifact = DecisionArtifact | FileLogArtifact | NoteArtifact | ChangeSetArtifact;
+// Union type for agent-authored artifacts
+export type Artifact = DecisionArtifact | NoteArtifact | ChangeSetArtifact;
 
 // Artifact query/filter options
 export interface ArtifactFilters {

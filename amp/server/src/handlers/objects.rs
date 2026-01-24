@@ -1,17 +1,17 @@
+use crate::{
+    models::AmpObject,
+    surreal_json::{normalize_object_id, take_json_values},
+    AppState,
+};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::Json,
 };
 use serde::Serialize;
-use uuid::Uuid;
 use serde_json::Value;
 use tokio::time::{timeout, Duration};
-use crate::{
-    models::AmpObject,
-    surreal_json::{normalize_object_id, take_json_values},
-    AppState,
-};
+use uuid::Uuid;
 
 fn extract_object_id(obj: &AmpObject) -> Uuid {
     match obj {
@@ -33,7 +33,8 @@ fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
         AmpObject::Run(r) => serde_json::to_value(r),
         AmpObject::FileChunk(f) => serde_json::to_value(f),
         AmpObject::FileLog(f) => serde_json::to_value(f),
-    }.map_err(|err| {
+    }
+    .map_err(|err| {
         tracing::error!("Failed to serialize payload: {}", err);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
@@ -41,10 +42,17 @@ fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
     // Set timestamps if not provided
     if let Some(map) = value.as_object_mut() {
         let now = chrono::Utc::now().to_rfc3339();
-        if !map.contains_key("created_at") || map.get("created_at").map(|v| v.is_null()).unwrap_or(true) {
-            map.insert("created_at".to_string(), serde_json::Value::String(now.clone()));
+        if !map.contains_key("created_at")
+            || map.get("created_at").map(|v| v.is_null()).unwrap_or(true)
+        {
+            map.insert(
+                "created_at".to_string(),
+                serde_json::Value::String(now.clone()),
+            );
         }
-        if !map.contains_key("updated_at") || map.get("updated_at").map(|v| v.is_null()).unwrap_or(true) {
+        if !map.contains_key("updated_at")
+            || map.get("updated_at").map(|v| v.is_null()).unwrap_or(true)
+        {
             map.insert("updated_at".to_string(), serde_json::Value::String(now));
         }
     }
@@ -55,7 +63,7 @@ fn payload_to_content_value(payload: &AmpObject) -> Result<Value, StatusCode> {
         tracing::error!("Failed to stringify JSON: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
-    
+
     let plain_value = serde_json::from_str(&json_str).map_err(|e| {
         tracing::error!("Failed to parse JSON: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
@@ -210,13 +218,12 @@ async fn apply_embedding(state: &AppState, obj: AmpObject) -> AmpObject {
     }
 }
 
-
-
 pub async fn create_object(
     State(state): State<AppState>,
     Json(payload): Json<serde_json::Value>,
 ) -> Result<(StatusCode, Json<Value>), StatusCode> {
-    let object_id = payload.get("id")
+    let object_id = payload
+        .get("id")
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
@@ -259,22 +266,18 @@ pub async fn create_object(
     let query = format!("CREATE objects:`{}` CONTENT $data", object_id);
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client
-            .query(query)
-            .bind(("data", clean_payload)),
+        state.db.client.query(query).bind(("data", clean_payload)),
     )
     .await;
 
     match result {
-        Ok(Ok(_)) => {
-            Ok((
-                StatusCode::CREATED,
-                Json(serde_json::json!({
-                    "id": object_id,
-                    "created_at": chrono::Utc::now().to_rfc3339()
-                })),
-            ))
-        }
+        Ok(Ok(_)) => Ok((
+            StatusCode::CREATED,
+            Json(serde_json::json!({
+                "id": object_id,
+                "created_at": chrono::Utc::now().to_rfc3339()
+            })),
+        )),
         Ok(Err(e)) => {
             tracing::error!("Failed to create object: {}", e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
@@ -317,7 +320,8 @@ pub async fn create_objects_batch(
     let mut failed = 0;
 
     for mut obj_value in payload {
-        let object_id = obj_value.get("id")
+        let object_id = obj_value
+            .get("id")
             .and_then(|v| v.as_str())
             .and_then(|s| Uuid::parse_str(s).ok())
             .unwrap_or_else(Uuid::new_v4);
@@ -349,9 +353,7 @@ pub async fn create_objects_batch(
         let query = "INSERT INTO objects $data";
         let result: Result<Result<surrealdb::Response, _>, _> = timeout(
             Duration::from_secs(5),
-            state.db.client
-                .query(query)
-                .bind(("data", obj_value)),
+            state.db.client.query(query).bind(("data", obj_value)),
         )
         .await;
 
@@ -393,10 +395,17 @@ pub async fn create_objects_batch(
         StatusCode::from_u16(207).unwrap() // Multi-Status
     };
 
-    Ok((status_code, Json(BatchResponse {
-        results,
-        summary: BatchSummary { total, succeeded, failed },
-    })))
+    Ok((
+        status_code,
+        Json(BatchResponse {
+            results,
+            summary: BatchSummary {
+                total,
+                succeeded,
+                failed,
+            },
+        }),
+    ))
 }
 
 fn extract_text_for_embedding(obj: &Value) -> Option<String> {
@@ -455,9 +464,7 @@ pub async fn get_object(
     let query = "SELECT VALUE { id: string::concat(id), type: type, title: title, project_id: project_id, agent_id: agent_id, run_id: run_id, tags: tags, context: context, decision: decision, consequences: consequences, alternatives: alternatives, status: status, file_path: file_path, summary: summary, symbols: symbols, dependencies: dependencies, content: content, category: category, description: description, diff_summary: diff_summary, files_changed: files_changed, linked_objects: linked_objects, linked_decisions: linked_decisions, linked_files: linked_files, memory_layers: memory_layers, created_at: created_at, updated_at: updated_at, provenance: provenance, change_history: change_history } FROM objects WHERE id = type::thing('objects', $id)";
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client
-            .query(query)
-            .bind(("id", raw_id)),
+        state.db.client.query(query).bind(("id", raw_id)),
     )
     .await;
 
@@ -495,16 +502,16 @@ pub async fn update_object(
 
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
-        state.db.client
-            .query(query)
-            .bind(("data", payload)),
+        state.db.client.query(query).bind(("data", payload)),
     )
     .await;
 
     match result {
         Ok(Ok(_)) => {
             tracing::info!("Object updated: {}", id);
-            Ok(Json(serde_json::json!({"success": true, "message": "Object updated"})))
+            Ok(Json(
+                serde_json::json!({"success": true, "message": "Object updated"}),
+            ))
         }
         Ok(Err(e)) => {
             tracing::error!("Failed to update object {}: {}", id, e);
@@ -522,7 +529,7 @@ pub async fn delete_object(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, StatusCode> {
     let query = "DELETE type::record('objects', $id)";
-    
+
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client.query(query).bind(("id", id)),

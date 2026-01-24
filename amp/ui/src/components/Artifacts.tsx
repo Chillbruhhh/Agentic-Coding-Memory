@@ -3,28 +3,24 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { HiRefresh } from 'react-icons/hi';
 import { GiTrashCan } from 'react-icons/gi';
-import { VscGitPullRequestGoToChanges } from 'react-icons/vsc';
-import { TbFileDescription, TbNote, TbBulb } from 'react-icons/tb';
-import { SiGraphql } from 'react-icons/si';
+import { SiGraphql, SiObsidian } from 'react-icons/si';
 import { BiVector } from 'react-icons/bi';
 import { MdTimeline } from 'react-icons/md';
 import { useArtifacts, ArtifactSummary } from '../hooks/useArtifacts';
 import { Artifact, ArtifactType } from '../types/amp';
 
-type ArtifactTab = 'all' | ArtifactType;
-
-const ARTIFACT_TYPE_CONFIG: Record<ArtifactType, { icon: React.ComponentType<{ className?: string }>, label: string, color: string }> = {
-  decision: { icon: TbBulb, label: 'Decision', color: 'text-amber-400' },
-  filelog: { icon: TbFileDescription, label: 'File Log', color: 'text-blue-400' },
-  note: { icon: TbNote, label: 'Note', color: 'text-green-400' },
-  changeset: { icon: VscGitPullRequestGoToChanges, label: 'Change Set', color: 'text-purple-400' }
+// Type labels for display
+const TYPE_LABELS: Record<ArtifactType, string> = {
+  decision: 'Decision',
+  filelog: 'File Log',
+  note: 'Note',
+  changeset: 'Changeset'
 };
 
 export const Artifacts: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<ArtifactTab>('all');
   const [selectedArtifact, setSelectedArtifact] = useState<ArtifactSummary | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<Artifact | null>(null);
-  const { artifacts, loading, error, refetch, fetchArtifactDetails, deleteArtifact, getTypeCounts, getLayerCounts } = useArtifacts();
+  const { artifacts, loading, error, refetch, fetchArtifactDetails, deleteArtifact, getLayerCounts } = useArtifacts();
 
   // Fetch details when artifact is selected
   useEffect(() => {
@@ -37,29 +33,19 @@ export const Artifacts: React.FC = () => {
     }
   }, [selectedArtifact, fetchArtifactDetails]);
 
-  // Filter artifacts by tab
-  const filteredArtifacts = activeTab === 'all'
-    ? artifacts
-    : artifacts.filter(a => a.type === activeTab);
-
-  const typeCounts = getTypeCounts();
   const layerCounts = getLayerCounts();
 
   const formatDate = (dateStr?: string) => {
     if (!dateStr) return 'Unknown';
+    // Check if date is valid and not a current-time fallback
     const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return 'Unknown';
     return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
     });
-  };
-
-  const renderArtifactIcon = (type: ArtifactType, className?: string) => {
-    const config = ARTIFACT_TYPE_CONFIG[type];
-    const Icon = config.icon;
-    return <Icon className={`${config.color} ${className || 'w-4 h-4'}`} />;
   };
 
   const renderMemoryLayerBadges = (artifact: ArtifactSummary) => (
@@ -108,7 +94,7 @@ export const Artifacts: React.FC = () => {
         return (
           <div className="p-4 space-y-4 overflow-y-auto">
             <div className="flex items-center gap-2 mb-4">
-              {renderArtifactIcon('decision', 'w-5 h-5')}
+              <SiObsidian className="w-5 h-5 text-red-500" />
               <h3 className="text-lg font-semibold text-slate-200 flex-1">{selectedDetail.title}</h3>
               <button
                 onClick={handleDelete}
@@ -159,7 +145,7 @@ export const Artifacts: React.FC = () => {
         return (
           <div className="p-4 space-y-4 overflow-y-auto">
             <div className="flex items-center gap-2 mb-4">
-              {renderArtifactIcon('filelog', 'w-5 h-5')}
+              <SiObsidian className="w-5 h-5 text-red-500" />
               <h3 className="text-lg font-semibold text-slate-200 flex-1">{selectedDetail.title}</h3>
               <button
                 onClick={handleDelete}
@@ -210,7 +196,7 @@ export const Artifacts: React.FC = () => {
         return (
           <div className="p-4 space-y-4 overflow-y-auto">
             <div className="flex items-center gap-2 mb-4">
-              {renderArtifactIcon('note', 'w-5 h-5')}
+              <SiObsidian className="w-5 h-5 text-red-500" />
               <h3 className="text-lg font-semibold text-slate-200 flex-1">{selectedDetail.title}</h3>
               <button
                 onClick={handleDelete}
@@ -245,7 +231,7 @@ export const Artifacts: React.FC = () => {
         return (
           <div className="p-4 space-y-4 overflow-y-auto">
             <div className="flex items-center gap-2 mb-4">
-              {renderArtifactIcon('changeset', 'w-5 h-5')}
+              <SiObsidian className="w-5 h-5 text-red-500" />
               <h3 className="text-lg font-semibold text-slate-200 flex-1">{selectedDetail.title}</h3>
               <button
                 onClick={handleDelete}
@@ -314,37 +300,12 @@ export const Artifacts: React.FC = () => {
           </div>
         </div>
 
-        {/* Type Filter Tabs */}
+        {/* Artifact Count */}
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setActiveTab('all')}
-            className={`px-3 py-1.5 text-xs font-medium rounded transition-colors ${
-              activeTab === 'all'
-                ? 'bg-primary text-white'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-            }`}
-          >
-            ALL {artifacts.length}
-          </button>
-          {(Object.keys(ARTIFACT_TYPE_CONFIG) as ArtifactType[]).map(type => {
-            const config = ARTIFACT_TYPE_CONFIG[type];
-            const Icon = config.icon;
-            const count = typeCounts[type];
-            return (
-              <button
-                key={type}
-                onClick={() => setActiveTab(type)}
-                className={`px-3 py-1.5 text-xs font-medium rounded transition-colors flex items-center gap-1.5 ${
-                  activeTab === type
-                    ? 'bg-primary text-white'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {count}
-              </button>
-            );
-          })}
+          <div className="px-3 py-1.5 text-xs font-medium rounded bg-primary text-white flex items-center gap-1.5">
+            <SiObsidian className="w-3.5 h-3.5" />
+            {artifacts.length}
+          </div>
         </div>
       </div>
 
@@ -356,16 +317,15 @@ export const Artifacts: React.FC = () => {
             <div className="p-4 text-center text-slate-500">Loading artifacts...</div>
           ) : error ? (
             <div className="p-4 text-center text-red-400">{error}</div>
-          ) : filteredArtifacts.length === 0 ? (
+          ) : artifacts.length === 0 ? (
             <div className="p-4 text-center text-slate-500">
-              No artifacts in this view.
+              No artifacts found.
             </div>
           ) : (
             <div className="divide-y divide-border-dark">
-              {filteredArtifacts.map((artifact) => {
-                const config = ARTIFACT_TYPE_CONFIG[artifact.type];
-                const Icon = config.icon;
+              {artifacts.map((artifact) => {
                 const isSelected = selectedArtifact?.id === artifact.id;
+                const typeLabel = TYPE_LABELS[artifact.type] || artifact.type;
 
                 return (
                   <div
@@ -379,7 +339,7 @@ export const Artifacts: React.FC = () => {
                   >
                     <div className="flex items-start gap-3">
                       <div className={`p-2 rounded ${isSelected ? 'bg-red-900/40' : 'bg-slate-800/50'}`}>
-                        <Icon className={`w-4 h-4 ${config.color}`} />
+                        <SiObsidian className="w-4 h-4 text-red-500" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
@@ -387,6 +347,8 @@ export const Artifacts: React.FC = () => {
                           {renderMemoryLayerBadges(artifact)}
                         </div>
                         <div className="text-xs text-slate-500 mt-0.5">
+                          <span className="text-red-400/70">{typeLabel}</span>
+                          <span className="mx-1">•</span>
                           {formatDate(artifact.created_at)}
                           {artifact.agent_id && <span className="ml-2">by {artifact.agent_id}</span>}
                         </div>

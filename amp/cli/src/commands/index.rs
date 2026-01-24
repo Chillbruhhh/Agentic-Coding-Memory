@@ -2,10 +2,10 @@ use crate::client::AmpClient;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use walkdir::WalkDir;
+use ignore::WalkBuilder;
 use uuid::Uuid;
 use chrono::Utc;
 use toml;
@@ -88,13 +88,16 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     }
     check_cancel(&cancel_flag)?;
     
-    let root_path = Path::new(path);
+    let root_path_input = Path::new(path);
+    let root_path = root_path_input
+        .canonicalize()
+        .unwrap_or_else(|_| root_path_input.to_path_buf());
     if !root_path.exists() {
         anyhow::bail!("Directory does not exist: {}", path);
     }
     
     // Create project root node first
-    let (project_object_id, project_id) = create_project_node(root_path, client).await?;
+    let (project_object_id, project_id) = create_project_node(&root_path, client).await?;
     if !use_tui {
         index_log!("Created project node: {} (id: {})", project_id, project_object_id);
     }
@@ -105,12 +108,12 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
 
     let mut warnings: Vec<String> = Vec::new();
 
-    let (worker_count, index_ai_enabled) = match get_index_settings(client).await {
-        Ok(settings) => (settings.worker_count, settings.ai_enabled),
+    let (worker_count, index_ai_enabled, index_respect_gitignore) = match get_index_settings(client).await {
+        Ok(settings) => (settings.worker_count, settings.ai_enabled, settings.respect_gitignore),
         Err(e) => {
             warnings.push(format!("Failed to load index settings: {}", e));
             with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
-            (4, true)
+            (4, true, true)
         }
     };
     let worker_count = worker_count.clamp(1, 32);
@@ -123,7 +126,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
             state.phase = "Project log".to_string();
             state.status_message = "Generating project AI log".to_string();
         });
-        if let Err(e) = create_project_ai_log_and_link(root_path, &project_object_id, &project_id, client).await {
+        if let Err(e) = create_project_ai_log_and_link(&root_path, &project_object_id, &project_id, client).await {
             warnings.push(format!("Project AI log failed: {}", e));
             with_ui_state(&ui_state, use_tui, |state| state.warnings += 1);
         }
@@ -143,6 +146,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         "env".to_string(),
         ".env".to_string(),
         "node_modules".to_string(),
+        "lib".to_string(),
+        "Lib".to_string(),
+        "libs".to_string(),
         "target".to_string(),
         "dist".to_string(),
         "build".to_string(),
@@ -158,6 +164,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         "Thumbs.db".to_string(),
         ".idea".to_string(),
         ".vscode".to_string(),
+        "amp-core".to_string(),
         "*.egg-info".to_string(),
         ".coverage".to_string(),
         "htmlcov".to_string(),
@@ -169,15 +176,23 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     }
     
     // Track created directories to avoid duplicates
-    let mut created_dirs = std::collections::HashSet::new();
+    let mut created_dir_keys: HashSet<String> = HashSet::new();
+    let mut dir_index: HashMap<String, String> = HashMap::new();
     let mut created_dir_nodes: Vec<(PathBuf, String)> = Vec::new();
     
     // Walk directory and collect supported files
-    let supported_extensions = vec!["py", "ts", "tsx", "js", "jsx", "rs", "md", "txt", "json", "toml", "yaml", "yml"];
     let mut files_to_process = Vec::new();
     let mut skipped_files = Vec::new();
     
-    for entry in WalkDir::new(root_path).follow_links(false) {
+    let mut walker = WalkBuilder::new(&root_path);
+    walker.follow_links(false).hidden(false);
+    if index_respect_gitignore {
+        walker.git_ignore(true).git_exclude(false).git_global(false);
+    } else {
+        walker.git_ignore(false).git_exclude(false).git_global(false);
+    }
+
+    for entry in walker.build() {
         check_cancel(&cancel_flag)?;
         match entry {
             Ok(entry) => {
@@ -189,27 +204,25 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
                     continue;
                 }
                 
-                // Create directory nodes for all directories in the path
-                if let Some(parent) = path.parent() {
-                    if parent != root_path {
-                        let relative_parent = parent.strip_prefix(root_path).unwrap_or(parent);
-                        let dir_key = relative_parent.to_string_lossy().to_string();
-                        
-                        if !created_dirs.contains(&dir_key) && !dir_key.is_empty() {
-                            match create_directory_node(parent, &project_object_id, &project_id, client).await {
-                                Ok(dir_id) => {
-                                    created_directories += 1;
-                                    created_dirs.insert(dir_key);
-                                    created_dir_nodes.push((parent.to_path_buf(), dir_id));
-                                    if !use_tui {
-                                        index_log!("Created directory node: {}", parent.display());
-                                    }
-                                }
-                                Err(e) => {
-                                    errors.push(format!("Failed to create directory node for {}: {}", parent.display(), e));
-                                    with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
-                                }
-                            }
+                // Ensure directory chain exists for this entry
+                if let Some(dir_path) = if path.is_dir() { Some(path) } else { path.parent() } {
+                    if dir_path != root_path {
+                        if let Err(e) = ensure_directory_chain(
+                            dir_path,
+                            &root_path,
+                            &project_object_id,
+                            &project_id,
+                            client,
+                            &mut created_dir_keys,
+                            &mut dir_index,
+                            &mut created_dir_nodes,
+                            &mut created_directories,
+                            use_tui,
+                        )
+                        .await
+                        {
+                            errors.push(format!("Failed to create directory nodes for {}: {}", dir_path.display(), e));
+                            with_ui_state(&ui_state, use_tui, |state| state.errors += 1);
                         }
                     }
                 }
@@ -257,6 +270,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         for skip in skipped_files.iter().take(10) {
             index_log!("   {}", skip);
         }
+        if index_respect_gitignore {
+            index_log!("Note: .gitignore entries are filtered before walking and are not counted above.");
+        }
     }
 
     if index_ai_enabled && !created_dir_nodes.is_empty() {
@@ -300,6 +316,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     });
     let semaphore = Arc::new(Semaphore::new(worker_count));
     let mut join_set = JoinSet::new();
+    let dir_index = Arc::new(dir_index);
     for file_path in &files_to_process {
         check_cancel(&cancel_flag)?;
         let permit = semaphore.clone().acquire_owned().await?;
@@ -307,9 +324,14 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         let project_object_id = project_object_id.clone();
         let project_id = project_id.clone();
         let file_path = file_path.clone();
+        let dir_index = Arc::clone(&dir_index);
         join_set.spawn(async move {
             let _permit = permit;
-            let file_id = create_file_node(&file_path, &project_object_id, &project_id, &client).await?;
+            let parent_dir_id = file_path
+                .parent()
+                .and_then(path_key)
+                .and_then(|key| dir_index.get(&key).cloned());
+            let file_id = create_file_node(&file_path, &project_object_id, &project_id, parent_dir_id.as_deref(), &client).await?;
             Ok::<(PathBuf, String), anyhow::Error>((file_path, file_id))
         });
     }
@@ -434,7 +456,7 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
 
         // Show project name detection info
         index_log!("\nProject Name Detection:");
-        if let Some(detected_name) = detect_project_name(root_path) {
+        if let Some(detected_name) = detect_project_name(&root_path) {
             index_log!("   Detected from config file: {}", detected_name);
         } else {
             let fallback_name = root_path.file_name()
@@ -449,6 +471,9 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         index_log!("\nSkipped {} files:", skipped_files.len());
         for skip in skipped_files.iter() {
             index_log!("   {}", skip);
+        }
+        if index_respect_gitignore {
+            index_log!("Note: .gitignore entries are filtered before walking and are not counted above.");
         }
     }
     
@@ -475,9 +500,59 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
     Ok(())
 }
 
+async fn ensure_directory_chain(
+    dir_path: &Path,
+    root_path: &Path,
+    project_object_id: &str,
+    project_id: &str,
+    client: &AmpClient,
+    created_dir_keys: &mut HashSet<String>,
+    dir_index: &mut HashMap<String, String>,
+    created_dir_nodes: &mut Vec<(PathBuf, String)>,
+    created_directories: &mut usize,
+    use_tui: bool,
+) -> Result<()> {
+    let relative = dir_path.strip_prefix(root_path).unwrap_or(dir_path);
+    if relative.as_os_str().is_empty() {
+        return Ok(());
+    }
+
+    let mut current = root_path.to_path_buf();
+    let mut parent_id: Option<String> = None;
+
+    for component in relative.components() {
+        current.push(component.as_os_str());
+        let key = match path_key(&current) {
+            Some(key) => key,
+            None => continue,
+        };
+
+        if !created_dir_keys.contains(&key) {
+            let dir_id = create_directory_node(&current, project_object_id, project_id, client).await?;
+            *created_directories += 1;
+            created_dir_keys.insert(key.clone());
+            dir_index.insert(key.clone(), dir_id.clone());
+            created_dir_nodes.push((current.clone(), dir_id.clone()));
+            if !use_tui {
+                index_log!("Created directory node: {}", current.display());
+            }
+
+            if let Some(parent) = parent_id.as_ref() {
+                let _ = client.create_relationship_direct(parent, &dir_id, "defined_in").await;
+                let _ = client.create_relationship_direct(&dir_id, parent, "defined_in").await;
+            }
+        }
+
+        parent_id = dir_index.get(&key).cloned();
+    }
+
+    Ok(())
+}
+
 struct IndexSettings {
     worker_count: usize,
     ai_enabled: bool,
+    respect_gitignore: bool,
 }
 
 async fn get_index_settings(client: &AmpClient) -> Result<IndexSettings> {
@@ -491,16 +566,19 @@ async fn get_index_settings(client: &AmpClient) -> Result<IndexSettings> {
         .and_then(|v| v.as_str())
         .map(|value| value != "none")
         .unwrap_or(true);
+    let respect_gitignore = settings
+        .get("indexRespectGitignore")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     Ok(IndexSettings {
         worker_count: workers,
         ai_enabled,
+        respect_gitignore,
     })
 }
 
 
 pub fn should_exclude(path: &Path, exclude_patterns: &[String]) -> bool {
-    let path_str = path.to_string_lossy();
-    
     for pattern in exclude_patterns {
         // Handle wildcard patterns like *.log or *.egg-info
         if pattern.starts_with('*') {
@@ -711,6 +789,7 @@ async fn create_project_ai_log_and_link(
     Ok(())
 }
 
+
 async fn create_directory_node(dir_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
     let dir_name = dir_path.file_name()
@@ -778,6 +857,7 @@ async fn create_directory_ai_log_and_link(
     Ok(())
 }
 
+
 async fn process_file_hierarchical(
     file_path: &Path,
     project_object_id: &str,
@@ -790,7 +870,7 @@ async fn process_file_hierarchical(
     index_log!("Processing file: {}", file_path.display());
     
     // Create file node first
-    let file_id = create_file_node(file_path, project_object_id, project_id, client).await?;
+    let file_id = create_file_node(file_path, project_object_id, project_id, None, client).await?;
     if let Some(key) = path_key(file_path) {
         file_index.insert(key, file_id.clone());
     }
@@ -941,7 +1021,13 @@ fn resolve_dependency_path(dep: &str, file_path: &Path, root_path: &Path) -> Opt
     None
 }
 
-async fn create_file_node(file_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
+async fn create_file_node(
+    file_path: &Path,
+    project_object_id: &str,
+    project_id: &str,
+    parent_dir_id: Option<&str>,
+    client: &AmpClient,
+) -> Result<String> {
     let now = Utc::now();
     let file_name = file_path.file_name()
         .and_then(|n| n.to_str())
@@ -999,8 +1085,13 @@ async fn create_file_node(file_path: &Path, project_object_id: &str, project_id:
 
     // Symmetric relationship for traversal convenience
     match client.create_relationship_direct(&file_id, project_object_id, "defined_in").await {
-        Ok(_) => {},
+        Ok(_) => {}
         Err(e) => index_log!("  Failed to create reverse relationship: {}", e),
+    }
+
+    if let Some(parent_id) = parent_dir_id {
+        let _ = client.create_relationship_direct(parent_id, &file_id, "defined_in").await;
+        let _ = client.create_relationship_direct(&file_id, parent_id, "defined_in").await;
     }
     
     Ok(file_id)
@@ -1236,7 +1327,7 @@ async fn create_file_log(file_path: &Path, file_id: &str, project_id: &str, symb
     };
 
     let symbol_count = symbols.len();
-    let symbol_types: Vec<String> = symbols.iter().filter_map(|s| s.get("kind").and_then(|k| k.as_str()).map(|s| s.to_string())).collect();
+    let _symbol_types: Vec<String> = symbols.iter().filter_map(|s| s.get("kind").and_then(|k| k.as_str()).map(|s| s.to_string())).collect();
     
     let purpose = if symbol_count > 0 {
         format!("Contains {} symbols", symbol_count)

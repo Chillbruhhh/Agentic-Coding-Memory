@@ -1,4 +1,8 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::Json};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::Json,
+};
 use serde::Serialize;
 use uuid::Uuid;
 

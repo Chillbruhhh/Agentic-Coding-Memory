@@ -167,7 +167,7 @@ export const useCodebases = () => {
 
       objects = objects.filter(obj => {
         const objType = (obj.type || '').toLowerCase();
-        return ['symbol', 'file', 'note', 'decision', 'changeset', 'artifact_core'].includes(objType);
+        return ['symbol', 'file', 'filelog', 'filechunk', 'note', 'decision', 'changeset', 'artifact_core'].includes(objType);
       });
 
       if (objects.length === 0) {

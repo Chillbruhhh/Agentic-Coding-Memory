@@ -1,9 +1,10 @@
+pub mod cache;
 pub mod context;
-pub mod query;
-pub mod memory;
-pub mod files;
 pub mod coordination;
 pub mod discovery;
+pub mod files;
+pub mod memory;
+pub mod query;
 
 use anyhow::Result;
 

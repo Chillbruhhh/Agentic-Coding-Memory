@@ -134,6 +134,20 @@ impl AmpClient {
         }
     }
 
+    pub async fn cache_write_items(&self, payload: Value) -> Result<Value> {
+        let response = self.client
+            .post(&format!("{}/v1/cache/write", self.base_url))
+            .json(&payload)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            Ok(response.json().await?)
+        } else {
+            anyhow::bail!("Failed to write cache items: {}", response.status())
+        }
+    }
+
     pub async fn create_relationship(&self, from_id: &str, to_id: &str, relation_type: &str) -> Result<Value> {
         // The IDs should already be UUIDs, but let's make sure they're clean
         let source_uuid = if from_id.starts_with("objects:") {

@@ -10,8 +10,9 @@ export const graphTheme = {
     method: '#10b981',     // Green
     variable: '#f59e0b',   // Yellow
     interface: '#8b5cf6',  // Purple
-    file: '#6b7280',       // Gray
-    directory: '#4b5563',  // Dark gray
+    file: '#94a3b8',       // Soft slate
+    directory: '#38bdf8',  // Sky blue
+    project: '#ef4444',    // Bright red (repo core)
     default: '#64748b'     // Slate
   },
   

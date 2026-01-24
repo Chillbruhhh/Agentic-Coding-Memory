@@ -1,3 +1,34 @@
+## Skills
+
+Skills are stored in `SKILLS/`. Load skills when relevant to your task.
+
+### How to use skills
+
+1. **Discover**: Read `SKILLS/README.md` to see available skills
+2. **Load**: When a task involves AMP tools, read `SKILLS/amp-core/SKILL.md`
+3. **Navigate**: Follow links in SKILL.md to reference docs as needed
+4. **Progressive disclosure**: Don't load every file - only what you need
+
+### When to load amp-core skill
+
+Load `SKILLS/amp-core/SKILL.md` when:
+- Working with persistent memory or shared state
+- Need to store/retrieve context across sessions
+- Making architectural decisions worth recording
+- Modifying code files (for provenance tracking)
+- Coordinating with other agents on shared resources
+- Searching existing knowledge (symbols, decisions, changesets)
+
+### Skill file priorities
+
+1. `SKILL.md` - Always read first (overview + navigation)
+2. `references/decision-guide.md` - When choosing which tool
+3. `references/tool-reference.md` - When need parameter details
+4. `references/workflows.md` - When following patterns
+5. `references/examples.md` - When need concrete examples
+6. `references/cache-policy.md` - When working with cache
+
+
 # Ignore ARCHON RELATED RULE IF ARCHONS NOT ACCESSIBLE
 
 # CRITICAL: ARCHON-FIRST RULE - READ THIS FIRST

@@ -1,13 +1,16 @@
-use anyhow::Result;
-use std::sync::Arc;
-use std::collections::{HashMap, VecDeque};
-use sysinfo::{Disks, System};
-use chrono::Utc;
 use crate::{
     database::Database,
-    models::analytics::{AnalyticsData, ActivityItem, SystemMetrics, IndexingStats, RequestLatencyData, LatencyPoint, ErrorDistributionItem, SystemEvent},
+    models::analytics::{
+        ActivityItem, AnalyticsData, ErrorDistributionItem, IndexingStats, LatencyPoint,
+        RequestLatencyData, SystemEvent, SystemMetrics,
+    },
     surreal_json::take_json_values,
 };
+use anyhow::Result;
+use chrono::Utc;
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use sysinfo::{Disks, System};
 
 #[derive(Debug, Clone)]
 struct LatencyBucket {
@@ -103,7 +106,7 @@ impl AnalyticsService {
         let mut result = self.db.client.query(query).await?;
         let values = take_json_values(&mut result, 0);
         let count = values.len() as i64;
-        
+
         tracing::info!("Total objects count: {}", count);
         Ok(count)
     }
@@ -152,7 +155,7 @@ impl AnalyticsService {
         for kind_value in kinds {
             if let (Some(kind), Some(count)) = (
                 kind_value.get("kind").and_then(|v| v.as_str()),
-                kind_value.get("count").and_then(|v| v.as_i64())
+                kind_value.get("count").and_then(|v| v.as_i64()),
             ) {
                 *map.entry(kind.to_string()).or_insert(0) += count;
             }
@@ -163,15 +166,12 @@ impl AnalyticsService {
         let mut result = self.db.client.query(other_type_query).await?;
         let types: Vec<serde_json::Value> = take_json_values(&mut result, 0);
 
-        tracing::info!(
-            "Non-symbol type query returned {} rows",
-            types.len()
-        );
+        tracing::info!("Non-symbol type query returned {} rows", types.len());
 
         for type_value in types {
             if let (Some(obj_type), Some(count)) = (
                 type_value.get("obj_type").and_then(|v| v.as_str()),
-                type_value.get("count").and_then(|v| v.as_i64())
+                type_value.get("count").and_then(|v| v.as_i64()),
             ) {
                 *map.entry(obj_type.to_string()).or_insert(0) += count;
             }
@@ -189,7 +189,7 @@ impl AnalyticsService {
         for count in counts {
             if let (Some(language), Some(count_val)) = (
                 count.get("language").and_then(|v| v.as_str()),
-                count.get("count").and_then(|v| v.as_i64())
+                count.get("count").and_then(|v| v.as_i64()),
             ) {
                 map.insert(language.to_string(), count_val);
             }
@@ -204,9 +204,21 @@ impl AnalyticsService {
 
         let mut activities = Vec::new();
         for (i, obj) in objects.iter().enumerate() {
-            let _id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-            let obj_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
-            let created_at = obj.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let _id = obj
+                .get("id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let obj_type = obj
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let created_at = obj
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             activities.push(ActivityItem {
                 id: format!("activity_{}", i),
@@ -226,7 +238,7 @@ impl AnalyticsService {
 
         let memory_usage = (system.used_memory() as f32 / system.total_memory() as f32) * 100.0;
         let cpu_usage = system.global_cpu_info().cpu_usage();
-        
+
         let disks = Disks::new_with_refreshed_list();
         let mut total_disk = 0_u64;
         let mut available_disk = 0_u64;
@@ -239,12 +251,9 @@ impl AnalyticsService {
         } else {
             0.0
         };
-        
+
         let uptime_secs = System::uptime();
-        let uptime = format!("{}h {}m", 
-            uptime_secs / 3600, 
-            (uptime_secs % 3600) / 60
-        );
+        let uptime = format!("{}h {}m", uptime_secs / 3600, (uptime_secs % 3600) / 60);
 
         Ok(SystemMetrics {
             memory_usage,
@@ -260,7 +269,8 @@ impl AnalyticsService {
             "SELECT count() AS total FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' AND string::lowercase(string::concat('', kind)) = 'file'";
         let mut result = self.db.client.query(files_query).await?;
         let files_counts: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        let files_indexed = files_counts.first()
+        let files_indexed = files_counts
+            .first()
             .and_then(|v| v.get("total"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
@@ -269,7 +279,8 @@ impl AnalyticsService {
         let symbols_query = "SELECT count() AS total FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol'";
         let mut result = self.db.client.query(symbols_query).await?;
         let symbols_counts: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        let symbols_extracted = symbols_counts.first()
+        let symbols_extracted = symbols_counts
+            .first()
             .and_then(|v| v.get("total"))
             .and_then(|v| v.as_i64())
             .unwrap_or(0);
@@ -279,7 +290,8 @@ impl AnalyticsService {
             "SELECT string::concat('', created_at) AS created_at FROM objects WHERE string::lowercase(string::concat('', type)) = 'symbol' ORDER BY created_at DESC LIMIT 1";
         let mut result = self.db.client.query(time_query).await?;
         let last_times: Vec<serde_json::Value> = take_json_values(&mut result, 0);
-        let last_index_time = last_times.first()
+        let last_index_time = last_times
+            .first()
             .and_then(|v| v.get("created_at"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
@@ -349,7 +361,10 @@ impl AnalyticsService {
 
         let mut events = Vec::new();
         for obj in objects {
-            let obj_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let obj_type = obj
+                .get("type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             let created_at = obj.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
 
             // Parse timestamp and format as HH:MM:SS

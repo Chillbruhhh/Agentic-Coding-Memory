@@ -1,6 +1,6 @@
+use crate::{database::Database, models::AmpObject};
 use anyhow::Result;
 use uuid::Uuid;
-use crate::{database::Database, models::AmpObject};
 
 pub struct StorageService {
     db: std::sync::Arc<Database>,

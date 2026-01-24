@@ -49,7 +49,10 @@ impl EmbeddingService for OpenAIEmbedding {
 
         let response = self
             .client
-            .post(format!("{}/embeddings", self.base_url.trim_end_matches('/')))
+            .post(format!(
+                "{}/embeddings",
+                self.base_url.trim_end_matches('/')
+            ))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .json(&request)
             .send()
@@ -61,7 +64,7 @@ impl EmbeddingService for OpenAIEmbedding {
         }
 
         let embedding_response: EmbeddingResponse = response.json().await?;
-        
+
         embedding_response
             .data
             .into_iter()

@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-pub mod relationships;
 pub mod analytics;
+pub mod relationships;
 pub mod settings;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

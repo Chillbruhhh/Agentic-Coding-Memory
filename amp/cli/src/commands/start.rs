@@ -2,6 +2,9 @@ use crate::{session::Session, process::AgentProcess, client::AmpClient, config::
 use anyhow::Result;
 use serde_json::json;
 use tokio::signal;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::sync::mpsc;
+use tokio::time::{interval, Duration, Instant};
 
 pub async fn start_session(agent_command: &str, client: &AmpClient) -> Result<()> {
     println!("Starting AMP session with agent: {}", agent_command);
@@ -46,8 +49,18 @@ pub async fn start_session(agent_command: &str, client: &AmpClient) -> Result<()
     
     println!("Session {} started", session.id);
     
+    let capture_output = should_capture_output();
+    if capture_output {
+        println!("AMP cache capture enabled (piped stdout/stderr). If the agent needs a TTY, set AMP_CAPTURE_AGENT_OUTPUT=0.");
+    }
+
     // Spawn agent process
-    let mut process = AgentProcess::spawn(agent_command).await?;
+    let mut process = AgentProcess::spawn(agent_command, capture_output).await?;
+    let cache_task = if capture_output {
+        start_cache_capture(&mut process, &session, client.clone())
+    } else {
+        None
+    };
     
     // Setup Ctrl+C handler
     let session_id = session.id;
@@ -84,6 +97,10 @@ pub async fn start_session(agent_command: &str, client: &AmpClient) -> Result<()
     
     // Cancel heartbeat
     heartbeat_handle.abort();
+
+    if let Some(handle) = cache_task {
+        handle.abort();
+    }
     
     // Release lease
     client.release_lease(lease_id).await?;
@@ -91,6 +108,115 @@ pub async fn start_session(agent_command: &str, client: &AmpClient) -> Result<()
     println!("Session {} finalized", session_id);
     
     Ok(())
+}
+
+fn should_capture_output() -> bool {
+    match std::env::var("AMP_CAPTURE_AGENT_OUTPUT") {
+        Ok(value) => matches!(value.as_str(), "1" | "true" | "yes" | "on"),
+        Err(_) => false,
+    }
+}
+
+fn start_cache_capture(
+    process: &mut AgentProcess,
+    session: &Session,
+    client: AmpClient,
+) -> Option<tokio::task::JoinHandle<()>> {
+    let stdout = process.take_stdout()?;
+    let stderr = process.take_stderr();
+    let scope_id = format!("project:{}", session.project_id);
+    let agent_label = session.agent_command.clone();
+
+    let (tx, mut rx) = mpsc::channel::<String>(256);
+    let tx_stdout = tx.clone();
+    let tx_stderr = tx.clone();
+
+    let stdout_handle = tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = tx_stdout.send(line.clone()).await;
+            println!("{}", line);
+        }
+    });
+
+    let stderr_handle = stderr.map(|stderr| {
+        tokio::spawn(async move {
+            let mut reader = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = reader.next_line().await {
+                let _ = tx_stderr.send(format!("stderr: {}", line.clone())).await;
+                eprintln!("{}", line);
+            }
+        })
+    });
+
+    Some(tokio::spawn(async move {
+        let mut buffer = String::new();
+        let mut ticker = interval(Duration::from_secs(5));
+        let mut last_flush = Instant::now();
+
+        loop {
+            tokio::select! {
+                line = rx.recv() => {
+                    match line {
+                        Some(line) => {
+                            if !buffer.is_empty() {
+                                buffer.push('\n');
+                            }
+                            buffer.push_str(&line);
+                            if buffer.len() >= 2000 {
+                                flush_cache_chunk(&client, &scope_id, &agent_label, &buffer).await;
+                                buffer.clear();
+                                last_flush = Instant::now();
+                            }
+                        }
+                        None => {
+                            if !buffer.is_empty() {
+                                flush_cache_chunk(&client, &scope_id, &agent_label, &buffer).await;
+                                buffer.clear();
+                            }
+                            break;
+                        }
+                    }
+                }
+                _ = ticker.tick() => {
+                    if !buffer.is_empty() && last_flush.elapsed() >= Duration::from_secs(5) {
+                        flush_cache_chunk(&client, &scope_id, &agent_label, &buffer).await;
+                        buffer.clear();
+                        last_flush = Instant::now();
+                    } else if buffer.is_empty() && rx.is_closed() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        stdout_handle.abort();
+        if let Some(handle) = stderr_handle {
+            handle.abort();
+        }
+    }))
+}
+
+async fn flush_cache_chunk(
+    client: &AmpClient,
+    scope_id: &str,
+    agent_label: &str,
+    content: &str,
+) {
+    let preview = content.chars().take(200).collect::<String>();
+    let payload = json!({
+        "scope_id": scope_id,
+        "items": [{
+            "kind": "snippet",
+            "preview": format!("{}: {}", agent_label, preview),
+            "facts": [],
+            "importance": 0.4
+        }]
+    });
+
+    if let Err(err) = client.cache_write_items(payload).await {
+        tracing::warn!("Cache write failed: {}", err);
+    }
 }
 
 async fn finalize_session(session: Session, client: &AmpClient, config: &Config) -> Result<()> {
