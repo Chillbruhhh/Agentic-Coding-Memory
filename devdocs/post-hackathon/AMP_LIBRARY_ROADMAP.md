@@ -134,3 +134,9 @@ Define a scalable path to offer AMP as an embeddable library (in-process), while
 - Review this roadmap and lock the core schema.
 - Create a minimal amp-core crate boundary.
 - Build first Rust API and validate with a small example agent.
+
+## Future CLI commands
+amp query "search"     # Search memory
+amp status             # Check server status
+amp tui                # Launch terminal UI
+amp clear              # Clear database
