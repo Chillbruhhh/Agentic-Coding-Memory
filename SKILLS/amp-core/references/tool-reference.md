@@ -1,10 +1,10 @@
 # AMP Tool Reference
 
-Complete reference for all 17 AMP MCP tools with parameters and examples.
+Complete reference for AMP MCP tools with parameters and examples.
 
 ---
 
-## Episodic Memory Cache (4 tools)
+## Episodic Memory Cache (3 tools)
 
 ### `amp_cache_write`
 
@@ -12,7 +12,7 @@ Write an item to the current open cache block.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `scope_id` | string | Yes | - | Scope (e.g., `project:amp`) |
+| `scope_id` | string | No | run scope | Scope (e.g., `project:amp`) |
 | `kind` | string | Yes | - | `fact`, `decision`, `snippet`, `warning` |
 | `content` | string | Yes | - | Content to store |
 | `importance` | number | No | 0.5 | 0.0-1.0 priority |
@@ -35,7 +35,7 @@ Close current block and open a new one. Call on conversation compact.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `scope_id` | string | Yes | Scope to compact |
+| `scope_id` | string | No | Scope to compact (defaults to run scope) |
 
 ```json
 { "scope_id": "project:amp" }
@@ -43,16 +43,26 @@ Close current block and open a new one. Call on conversation compact.
 
 ---
 
-### `amp_cache_search`
+### `amp_cache_read`
 
-Search closed block summaries (two-phase retrieval).
+Unified cache read - search blocks, get specific block, or get current block.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `scope_id` | string | Yes | - | Scope to search |
-| `query` | string | Yes | - | Search query |
-| `limit` | number | No | 5 | Max results |
+| `scope_id` | string | Yes | - | Scope identifier |
+| `query` | string | No | - | Search closed blocks by summary |
+| `limit` | number | No | 5 | Max blocks when searching |
+| `include_content` | boolean | No | false | Return full content with search |
+| `include_open` | boolean | No | false | Include current open block in search |
+| `block_id` | string | No | - | Get specific block by ID |
 
+**Mode selection:**
+- `query` only → search, return summaries
+- `query` + `include_content: true` → search, return full content
+- `block_id` → get specific block
+- neither → get current open block
+
+**Search (summaries):**
 ```json
 {
   "scope_id": "project:amp",
@@ -61,17 +71,16 @@ Search closed block summaries (two-phase retrieval).
 }
 ```
 
----
+**Search (full content):**
+```json
+{
+  "scope_id": "project:amp",
+  "query": "authentication implementation",
+  "include_content": true
+}
+```
 
-### `amp_cache_get`
-
-Get a specific block by ID or legacy memory pack.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `scope_id` | string | Yes | Scope identifier |
-| `block_id` | string | No | Block ID to retrieve |
-
+**Get specific block:**
 ```json
 {
   "scope_id": "project:amp",
@@ -105,6 +114,8 @@ Sync file state across all memory layers (temporal, vector, graph).
 
 **Path flexibility**: Accepts relative, absolute, or project-relative paths. Uses tiered matching with ambiguity detection.
 
+**Fresh vs existing repos**: On first sync in a new codebase with `action: "create"`, auto-creates project node (detects root via `.git` or `.amp-root`). The "create" action triggers project initialization. For existing codebases, user must install AMP CLI and run `amp index` from the project root first.
+
 **Ambiguous response** (when basename matches multiple files):
 ```json
 {
@@ -134,7 +145,7 @@ Read file audit trail, symbols, and dependencies.
 
 ---
 
-## Discovery & Search (5 tools)
+## Discovery & Search (4 tools)
 
 ### `amp_status`
 
@@ -154,27 +165,6 @@ Browse stored objects by type.
 
 ```json
 { "type": "decision", "limit": 5 }
-```
-
----
-
-### `amp_context`
-
-Get high-signal context bundle for a goal.
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `goal` | string | Yes | - | What you're accomplishing |
-| `scope` | string | Yes | - | Project scope |
-| `include_recent` | boolean | No | false | Include recent activity |
-| `include_decisions` | boolean | No | false | Prioritize decisions |
-
-```json
-{
-  "goal": "implement user authentication",
-  "scope": "project:myapp",
-  "include_decisions": true
-}
 ```
 
 ---
@@ -248,66 +238,35 @@ Create artifacts with graph relationships.
 
 ---
 
-## Run Tracking (2 tools)
 
-### `amp_run_start`
+## Focus Tracking (1 tool)
 
-Begin tracking an agent execution.
+### `amp_focus`
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `goal` | string | Yes | Run objective |
-| `repo_id` | string | Yes | Repository ID |
-| `agent_name` | string | Yes | Agent identifier |
-
----
-
-### `amp_run_end`
-
-Complete an agent execution.
+Manage session focus and outputs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `run_id` | string | Yes | Run ID from start |
-| `status` | string | Yes | `completed`, `failed`, `cancelled` |
-| `outputs` | array | Yes | Output strings |
-| `summary` | string | Yes | What was accomplished |
+| `action` | string | Yes | `list`, `get`, `set`, `complete`, `end` |
+| `run_id` | string | No | Defaults to current connection run |
+| `title` | string | No | Focus title (for `set`) |
+| `plan` | array | No | Plan steps (for `set`/`complete`) |
+| `summary` | string | No | Completion summary (for `complete`) |
+| `files_changed` | array | No | Files touched (for `complete`) |
+| `project_id` | string | No | Filter `list` or set project on `set` |
 
----
-
-## Coordination (2 tools)
-
-### `amp_lease_acquire`
-
-Lock a shared resource.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `resource` | string | Yes | Resource identifier |
-| `duration` | number | Yes | Lease seconds |
-| `agent_id` | string | Yes | Requesting agent |
-
+**Examples**:
 ```json
-{
-  "resource": "file:src/auth.rs",
-  "duration": 300,
-  "agent_id": "claude-1"
-}
+{ "action": "list" }
+```
+```json
+{ "action": "set", "title": "Fix cache UI", "plan": ["Repro", "Patch", "Verify"] }
+```
+```json
+{ "action": "complete", "summary": "Cache UI fixed", "files_changed": ["ui/CachePanel.tsx"] }
 ```
 
----
-
-### `amp_lease_release`
-
-Release a held lease.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `lease_id` | string | Yes | Lease ID |
-
----
-
-## Utility (1 tool)
+## Utility (2 tools)
 
 ### `amp_file_content_get`
 
@@ -317,3 +276,31 @@ Retrieve indexed file content from chunks.
 |-----------|------|----------|-------------|
 | `path` | string | Yes | File path |
 | `max_chars` | number | No | Limit content length |
+
+---
+
+### `amp_file_path_resolve`
+
+Resolve canonical stored path for ambiguous or relative file input.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `path` | string | Yes | File path to resolve |
+
+**When to use**:
+- Path is ambiguous (basename matches multiple files)
+- Relative path needs resolution
+- Cross-platform path format issues
+
+```json
+{ "path": "utils.py" }
+```
+
+**Response**:
+```json
+{
+  "input_path": "utils.py",
+  "normalized_path": "utils.py",
+  "tried_paths": ["utils.py", "src/utils.py"],
+  "resolved_path": "c:/project/src/utils.py"
+}

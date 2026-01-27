@@ -427,6 +427,9 @@ pub struct BlockSearchRequest {
     pub query: String,
     #[serde(default = "default_search_limit")]
     pub limit: usize,
+    /// Include the current open block in search results (default: false)
+    #[serde(default)]
+    pub include_open: bool,
 }
 
 fn default_search_limit() -> usize {
@@ -451,14 +454,67 @@ pub async fn block_search(
     State(state): State<AppState>,
     Json(request): Json<BlockSearchRequest>,
 ) -> Result<Json<BlockSearchResponse>, (StatusCode, String)> {
+    let mut matches: Vec<BlockMatch> = Vec::new();
+
+    // If include_open is true, first add the current open block (if it exists and matches)
+    if request.include_open {
+        let open_query = "SELECT <string>id AS block_id, items, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'open' LIMIT 1";
+
+        let mut open_response = state.db.client
+            .query(open_query)
+            .bind(("scope_id", request.scope_id.clone()))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let open_values = take_json_values(&mut open_response, 0);
+
+        if let Some(open_block) = open_values.first() {
+            // Generate summary from items for the open block
+            let items = open_block.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            let mut summary_parts: Vec<String> = Vec::new();
+            let query_lower = request.query.to_lowercase();
+            let mut content_matches = false;
+
+            for item in &items {
+                if let Some(content) = item.get("content").and_then(|c| c.as_str()) {
+                    let kind = item.get("kind").and_then(|k| k.as_str()).unwrap_or("item");
+                    let part = format!("[{}] {}", kind, content);
+                    // Check if query matches content (case-insensitive)
+                    if content.to_lowercase().contains(&query_lower) || query_lower == "*" {
+                        content_matches = true;
+                    }
+                    if summary_parts.len() < 5 {
+                        summary_parts.push(part);
+                    }
+                }
+            }
+
+            // Include open block if query matches content or is wildcard
+            if content_matches || request.query == "*" {
+                let summary = if summary_parts.is_empty() {
+                    "[open block - no items yet]".to_string()
+                } else {
+                    summary_parts.join("; ")
+                };
+
+                matches.push(BlockMatch {
+                    block_id: open_block.get("block_id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    summary,
+                    relevance: 1.0, // Open block gets highest relevance since it's current
+                    created_at: open_block.get("created_at").and_then(|c| c.as_str()).unwrap_or("").to_string(),
+                });
+            }
+        }
+    }
+
     // Generate embedding for query
-    let query_embedding = if state.embedding_service.is_enabled() {
+    let query_embedding = if state.embedding_service.is_enabled() && request.query != "*" {
         state.embedding_service.generate_embedding(&request.query).await.ok()
     } else {
         None
     };
 
-    let matches = if let Some(embedding) = query_embedding {
+    let closed_matches: Vec<BlockMatch> = if let Some(embedding) = query_embedding {
         // Semantic search on summaries
         let vec_str = embedding.iter().map(|f| f.to_string()).collect::<Vec<_>>().join(", ");
         let search_query = format!(
@@ -483,8 +539,12 @@ pub async fn block_search(
             })
         }).collect()
     } else {
-        // Fallback: text search
-        let search_query = "SELECT <string>id AS block_id, summary, 0.5 AS relevance, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'closed' AND summary CONTAINS $query ORDER BY created_at DESC LIMIT $limit";
+        // Fallback: text search (or wildcard)
+        let search_query = if request.query == "*" {
+            "SELECT <string>id AS block_id, summary, 0.5 AS relevance, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'closed' ORDER BY created_at DESC LIMIT $limit"
+        } else {
+            "SELECT <string>id AS block_id, summary, 0.5 AS relevance, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'closed' AND summary CONTAINS $query ORDER BY created_at DESC LIMIT $limit"
+        };
 
         let mut response = state.db.client
             .query(search_query)
@@ -505,6 +565,9 @@ pub async fn block_search(
         }).collect()
     };
 
+    // Combine open block (if found) with closed block matches
+    matches.extend(closed_matches);
+
     Ok(Json(BlockSearchResponse { matches }))
 }
 
@@ -516,6 +579,36 @@ pub struct BlockGetResponse {
     pub items: Vec<Value>,
     pub token_count: usize,
     pub created_at: String,
+}
+
+/// Get the current open block for a scope
+pub async fn block_current(
+    State(state): State<AppState>,
+    axum::extract::Path(scope_id): axum::extract::Path<String>,
+) -> Result<Json<BlockGetResponse>, (StatusCode, String)> {
+    let query = "SELECT <string>id AS id_str, status, summary, items, token_count, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'open' LIMIT 1";
+
+    let mut response = state.db.client
+        .query(query)
+        .bind(("scope_id", scope_id.clone()))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let values = take_json_values(&mut response, 0);
+
+    if let Some(block) = values.first() {
+        Ok(Json(BlockGetResponse {
+            block_id: block.get("id_str").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            status: block.get("status").and_then(|v| v.as_str()).unwrap_or("open").to_string(),
+            summary: block.get("summary").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            items: block.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+            token_count: block.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            created_at: block.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        }))
+    } else {
+        // No open block exists - return empty response indicating none found
+        Err((StatusCode::NOT_FOUND, format!("No open block found for scope: {}", scope_id)))
+    }
 }
 
 /// Get a specific cache block by ID

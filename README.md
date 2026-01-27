@@ -260,7 +260,6 @@ See [amp/mcp-server/INTEGRATION.md](amp/mcp-server/INTEGRATION.md) for complete 
 ## MCP Tools for AI Agents
 
 ### Context & Retrieval
-- **amp_context** - High-signal memory bundle for tasks
 - **amp_query** - Hybrid search across all memory
 - **amp_trace** - Object provenance and relationships
 

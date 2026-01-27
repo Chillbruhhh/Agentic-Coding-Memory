@@ -4,6 +4,38 @@ When and why to create artifacts for effective agent memory.
 
 ---
 
+## How Artifacts Work
+
+When you call `amp_write_artifact`, it writes to **three memory layers**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    amp_write_artifact                        │
+│              type + title + content/decision                 │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│   TEMPORAL    │ │    VECTOR     │ │     GRAPH     │
+│   (SurrealDB) │ │  (Embeddings) │ │ (Relationships│
+├───────────────┤ ├───────────────┤ ├───────────────┤
+│ - Permanent   │ │ - ALWAYS ON   │ │ - linked_files│
+│   storage     │ │ - Semantic    │ │ - linked_     │
+│ - All fields  │ │   search via  │ │   decisions   │
+│ - Audit trail │ │   amp_query   │ │ - project_id  │
+│               │ │ - Auto-index  │ │ - Traceable   │
+└───────────────┘ └───────────────┘ └───────────────┘
+```
+
+**Key behaviors:**
+- **Vector embeddings are ALWAYS generated** - Every artifact is automatically indexed for semantic search via `amp_query`
+- `linked_files: ["src/auth.rs"]` → Creates `modifies` relationship to file node in graph
+- `linked_decisions: ["decision-uuid"]` → Creates `justified_by` relationship
+- `project_id: "my-project"` → Links artifact to project for filtering
+
+---
+
 ## The Core Test
 
 Before creating any artifact, ask:
@@ -186,3 +218,109 @@ Artifacts capture what gets lost when context resets:
 3. **Effective operations** - Patterns that worked
 
 **Quality over quantity.** One insightful artifact beats ten noisy ones.
+
+---
+
+## Complete Parameter Reference
+
+### Common Fields (all types)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `decision`, `note`, `changeset`, `filelog` |
+| `title` | Yes | Clear, descriptive title |
+| `project_id` | No | Link to project for filtering |
+| `tags` | No | Array of tags for categorization |
+| `linked_files` | No | Files this artifact relates to (creates graph edges) |
+| `linked_decisions` | No | Related decision artifacts |
+| `linked_objects` | No | Generic object links |
+| `agent_id` | No | Agent identifier for audit trail |
+| `run_id` | No | Link to agent run |
+
+### Decision Fields
+
+```json
+{
+  "type": "decision",
+  "title": "Use Redis for session caching",
+  "status": "accepted",
+  "context": "Need fast session storage with <10ms reads",
+  "decision": "Redis with 24h TTL, cluster mode for HA",
+  "consequences": "Requires Redis deployment, adds infra cost",
+  "alternatives": ["PostgreSQL - too slow", "In-memory - no persistence"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `status` | `proposed`, `accepted`, `deprecated`, `superseded` |
+| `context` | Problem being solved, constraints |
+| `decision` | What was decided |
+| `consequences` | Impact, trade-offs |
+| `alternatives` | Other options considered |
+
+### Note Fields
+
+```json
+{
+  "type": "note",
+  "title": "API rate limits reset at midnight UTC",
+  "category": "warning",
+  "content": "Rate limiter uses fixed windows, not sliding. Burst traffic at midnight may exceed limits.",
+  "tags": ["api", "rate-limiting"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `category` | `warning`, `insight`, `todo`, `question` |
+| `content` | The note content |
+
+### Changeset Fields
+
+```json
+{
+  "type": "changeset",
+  "title": "Add authentication middleware",
+  "description": "JWT validation with refresh token rotation",
+  "files_changed": ["src/middleware/auth.rs", "src/handlers/login.rs"],
+  "diff_summary": "+200 lines. New AuthMiddleware, token refresh endpoint.",
+  "linked_decisions": ["use-jwt-over-sessions"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `description` | What the changeset accomplishes |
+| `files_changed` | Array of modified files |
+| `diff_summary` | Brief summary of changes |
+
+### FileLog Fields (internal use)
+
+```json
+{
+  "type": "filelog",
+  "title": "src/auth/login.rs",
+  "file_path": "src/auth/login.rs",
+  "summary": "Authentication handler with OAuth support",
+  "symbols": ["login", "validate_token", "refresh"],
+  "dependencies": ["oauth2", "jsonwebtoken"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `file_path` | Path to the file |
+| `summary` | AI-generated file summary |
+| `symbols` | Key symbols in file |
+| `dependencies` | File dependencies |
+
+---
+
+## Discovering Artifacts
+
+After creating artifacts, they're discoverable via:
+
+- **`amp_query`** - Semantic search finds artifacts by content similarity
+- **`amp_trace`** - Follow relationships from files to linked artifacts
+- **`amp_list`** - Browse artifacts by type (`type: "decision"`)

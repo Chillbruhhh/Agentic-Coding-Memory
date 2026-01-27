@@ -49,7 +49,6 @@ Professional React/Tauri application with 3D knowledge graph visualization.
 Model Context Protocol server exposing AMP tools to AI agents like Claude Desktop and Cursor.
 
 **10 MCP Tools:**
-- Context & Retrieval: `amp_context`, `amp_query`, `amp_trace`
 - Memory Writes: `amp_write_decision`, `amp_write_changeset`, `amp_run_start`, `amp_run_end`
 - File Intelligence: `amp_filelog_get`, `amp_filelog_update`
 - Coordination: `amp_lease_acquire`, `amp_lease_release`

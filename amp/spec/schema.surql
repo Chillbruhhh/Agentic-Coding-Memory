@@ -284,3 +284,27 @@ DEFINE INDEX idx_cache_item_kind ON cache_item COLUMNS kind;
 DEFINE INDEX idx_cache_item_importance ON cache_item COLUMNS importance;
 DEFINE INDEX idx_cache_item_ttl ON cache_item COLUMNS ttl_expires_at;
 DEFINE INDEX idx_cache_item_embedding ON cache_item COLUMNS embedding MTREE DIMENSION 1536;
+
+-- ============================================================================
+-- Agent Connections - Real-time connection tracking for MCP clients
+-- ============================================================================
+
+-- Track active agent connections with TTL-based expiry
+DEFINE TABLE agent_connections SCHEMAFULL;
+DEFINE FIELD id ON agent_connections TYPE record<agent_connections>;
+DEFINE FIELD connection_id ON agent_connections TYPE string;
+DEFINE FIELD agent_id ON agent_connections TYPE string;
+DEFINE FIELD agent_name ON agent_connections TYPE string;
+DEFINE FIELD run_id ON agent_connections TYPE option<string>;
+DEFINE FIELD project_id ON agent_connections TYPE option<string>;
+DEFINE FIELD status ON agent_connections TYPE string DEFAULT "connected" ASSERT $value IN ["connected", "disconnected"];
+DEFINE FIELD last_heartbeat ON agent_connections TYPE datetime DEFAULT time::now();
+DEFINE FIELD connected_at ON agent_connections TYPE datetime DEFAULT time::now();
+DEFINE FIELD expires_at ON agent_connections TYPE datetime;
+
+-- Indexes for agent_connections
+DEFINE INDEX idx_agent_connections_id ON agent_connections COLUMNS connection_id UNIQUE;
+DEFINE INDEX idx_agent_connections_agent ON agent_connections COLUMNS agent_id;
+DEFINE INDEX idx_agent_connections_run ON agent_connections COLUMNS run_id;
+DEFINE INDEX idx_agent_connections_status ON agent_connections COLUMNS status;
+DEFINE INDEX idx_agent_connections_expires ON agent_connections COLUMNS expires_at;

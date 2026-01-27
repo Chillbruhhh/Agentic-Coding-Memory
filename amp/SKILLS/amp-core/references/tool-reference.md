@@ -158,7 +158,6 @@ Browse stored objects by type.
 
 ---
 
-### `amp_context`
 
 Get high-signal context bundle for a goal.
 

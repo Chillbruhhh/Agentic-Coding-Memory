@@ -257,9 +257,17 @@ pub async fn create_object(
         // including id in content causes: "Found 'id' for the `id` field, but a specific record has been specified"
         obj.remove("id");
 
-        // Remove timestamps - let DB set them
-        obj.remove("created_at");
-        obj.remove("updated_at");
+        let now = chrono::Utc::now().to_rfc3339();
+        if !obj.contains_key("created_at")
+            || obj.get("created_at").map(|v| v.is_null()).unwrap_or(true)
+        {
+            obj.insert("created_at".to_string(), serde_json::Value::String(now.clone()));
+        }
+        if !obj.contains_key("updated_at")
+            || obj.get("updated_at").map(|v| v.is_null()).unwrap_or(true)
+        {
+            obj.insert("updated_at".to_string(), serde_json::Value::String(now));
+        }
     }
 
     // Create with explicit ID using backtick syntax - but use proper JSON structure
@@ -344,10 +352,18 @@ pub async fn create_objects_batch(
             }
         }
 
-        // Remove timestamps - let DB set them
         if let Some(map) = obj_value.as_object_mut() {
-            map.remove("created_at");
-            map.remove("updated_at");
+            let now = chrono::Utc::now().to_rfc3339();
+            if !map.contains_key("created_at")
+                || map.get("created_at").map(|v| v.is_null()).unwrap_or(true)
+            {
+                map.insert("created_at".to_string(), serde_json::Value::String(now.clone()));
+            }
+            if !map.contains_key("updated_at")
+                || map.get("updated_at").map(|v| v.is_null()).unwrap_or(true)
+            {
+                map.insert("updated_at".to_string(), serde_json::Value::String(now));
+            }
         }
 
         let query = "INSERT INTO objects $data";
@@ -461,7 +477,7 @@ pub async fn get_object(
     let raw_id_for_log = raw_id.clone();
     tracing::debug!("Get object: {}", raw_id);
 
-    let query = "SELECT VALUE { id: string::concat(id), type: type, title: title, project_id: project_id, agent_id: agent_id, run_id: run_id, tags: tags, context: context, decision: decision, consequences: consequences, alternatives: alternatives, status: status, file_path: file_path, summary: summary, symbols: symbols, dependencies: dependencies, content: content, category: category, description: description, diff_summary: diff_summary, files_changed: files_changed, linked_objects: linked_objects, linked_decisions: linked_decisions, linked_files: linked_files, memory_layers: memory_layers, created_at: created_at, updated_at: updated_at, provenance: provenance, change_history: change_history } FROM objects WHERE id = type::thing('objects', $id)";
+    let query = "SELECT VALUE { id: string::concat(id), type: type, title: title, project_id: project_id, agent_id: agent_id, run_id: run_id, tags: tags, context: context, focus: focus, decision: decision, consequences: consequences, alternatives: alternatives, status: status, file_path: file_path, summary: summary, symbols: symbols, dependencies: dependencies, content: content, category: category, description: description, diff_summary: diff_summary, files_changed: files_changed, linked_objects: linked_objects, linked_decisions: linked_decisions, linked_files: linked_files, memory_layers: memory_layers, created_at: created_at, updated_at: updated_at, provenance: provenance, change_history: change_history, input_summary: input_summary, outputs: outputs, errors: errors, duration_ms: duration_ms, confidence: confidence } FROM objects WHERE id = type::thing('objects', $id)";
     let result: Result<Result<surrealdb::Response, _>, _> = timeout(
         Duration::from_secs(5),
         state.db.client.query(query).bind(("id", raw_id)),

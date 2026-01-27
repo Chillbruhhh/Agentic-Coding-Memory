@@ -41,7 +41,12 @@ export const useCodebases = () => {
 
     // Helper to normalize paths for comparison
     const normalizePath = (path: string) => {
-      return path.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\//, '');
+      return path
+        .replace(/^\\\\\\?\\/, '') // strip Windows long-path prefix
+        .replace(/\\/g, '/')
+        .replace(/^\.\//, '')
+        .replace(/^\//, '')
+        .toLowerCase();
     };
     const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
 
@@ -192,7 +197,7 @@ export const useCodebases = () => {
             if (!value) return value;
             return value
               .replace(/^objects:/, '')
-              .replace(/[⟨⟩]/g, '');
+              .replace(/[⟨⟩]/g, '').replace(/[\u27E8\u27E9]/g, '').replace(/\\\\/g, '').replace(/[^0-9a-fA-F-]/g, '');
           };
 
           const inId = normalizeId(rel.in);
@@ -408,4 +413,3 @@ export const useCodebases = () => {
     refetch
   };
 };
-

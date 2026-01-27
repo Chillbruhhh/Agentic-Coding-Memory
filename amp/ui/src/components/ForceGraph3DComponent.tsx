@@ -24,6 +24,131 @@ const dimColor = (color: string, opacity: number = 0.15): string => {
   return color;
 };
 
+const kindRank = (kind?: string) => {
+  switch ((kind || '').toLowerCase()) {
+    case 'project': return 0;
+    case 'directory': return 1;
+    case 'file': return 2;
+    case 'function':
+    case 'class':
+    case 'method':
+    case 'variable':
+    case 'interface':
+      return 3;
+    default:
+      return 4;
+  }
+};
+
+const applyHierarchyLayout = (data: GraphData): GraphData => {
+  if (!data?.nodes?.length) return data;
+
+  const nodes = data.nodes.map(node => ({ ...node }));
+  const nodeById = new Map<string, GraphNode>();
+  nodes.forEach(node => nodeById.set(node.id, node));
+
+  const parentCandidates = new Map<string, Set<string>>();
+  data.links.forEach(link => {
+    if ((link.type || '').toLowerCase() !== 'defined_in') return;
+    const sourceId = typeof link.source === 'object' ? link.source.id : link.source;
+    const targetId = typeof link.target === 'object' ? link.target.id : link.target;
+    const source = nodeById.get(sourceId);
+    const target = nodeById.get(targetId);
+    if (!source || !target) return;
+    const sourceRank = kindRank(source.kind);
+    const targetRank = kindRank(target.kind);
+    if (sourceRank === targetRank) return;
+    const parent = sourceRank < targetRank ? source : target;
+    const child = sourceRank < targetRank ? target : source;
+    if (!parentCandidates.has(child.id)) parentCandidates.set(child.id, new Set());
+    parentCandidates.get(child.id)!.add(parent.id);
+  });
+
+  const chooseParent = (child: GraphNode, candidates: string[]) => {
+    if (!candidates.length) return null;
+    const childKind = (child.kind || '').toLowerCase();
+    if (childKind === 'file') {
+      const dirParent = candidates.find(id => (nodeById.get(id)?.kind || '').toLowerCase() === 'directory');
+      if (dirParent) return dirParent;
+    }
+    if (childKind === 'directory') {
+      const dirParent = candidates.find(id => (nodeById.get(id)?.kind || '').toLowerCase() === 'directory');
+      if (dirParent) return dirParent;
+    }
+    if (childKind && !['project', 'directory', 'file'].includes(childKind)) {
+      const fileParent = candidates.find(id => (nodeById.get(id)?.kind || '').toLowerCase() === 'file');
+      if (fileParent) return fileParent;
+    }
+    return candidates
+      .map(id => ({ id, rank: kindRank(nodeById.get(id)?.kind) }))
+      .sort((a, b) => a.rank - b.rank)[0]?.id || null;
+  };
+
+  const parentMap = new Map<string, string>();
+  parentCandidates.forEach((parents, childId) => {
+    const child = nodeById.get(childId);
+    if (!child) return;
+    const chosen = chooseParent(child, Array.from(parents));
+    if (chosen) parentMap.set(childId, chosen);
+  });
+
+  const childrenByParent = new Map<string, GraphNode[]>();
+  parentMap.forEach((parentId, childId) => {
+    const parent = nodeById.get(parentId);
+    const child = nodeById.get(childId);
+    if (!parent || !child) return;
+    if (!childrenByParent.has(parentId)) childrenByParent.set(parentId, []);
+    childrenByParent.get(parentId)!.push(child);
+  });
+
+  const roots = nodes.filter(node => (node.kind || '').toLowerCase() === 'project');
+  const rootSpacing = 250;
+  roots.forEach((root, index) => {
+    root.x = index * rootSpacing;
+    root.y = 0;
+    root.z = 0;
+  });
+
+  const visited = new Set<string>();
+  const layoutChildren = (parent: GraphNode, depth: number) => {
+    const children = childrenByParent.get(parent.id) || [];
+    if (!children.length) return;
+    const parentKind = (parent.kind || '').toLowerCase();
+    const maxDepth = 3;
+    if (depth > maxDepth) return;
+    const radiusBase = 90;
+    const radius = Math.max(radiusBase - depth * 8, 45);
+    const angleStep = (Math.PI * 2) / children.length;
+    const yOffset = depth * 60;
+
+    children.forEach((child, idx) => {
+      const angle = idx * angleStep;
+      const targetX = (parent.x || 0) + radius * Math.cos(angle);
+      const targetY = (parent.y || 0) - yOffset;
+      const targetZ = (parent.z || 0) + radius * Math.sin(angle);
+      child.x = targetX;
+      child.y = targetY;
+      child.z = targetZ;
+    });
+
+    children.forEach(child => {
+      if (visited.has(child.id)) return;
+      visited.add(child.id);
+      const childKind = (child.kind || '').toLowerCase();
+      if (parentKind === 'project' && childKind !== 'directory') return;
+      if (parentKind === 'directory' && childKind !== 'file') return;
+      layoutChildren(child, depth + 1);
+    });
+  };
+
+  roots.forEach(root => {
+    visited.add(root.id);
+    layoutChildren(root, 1);
+  });
+
+  return { ...data, nodes };
+};
+
 export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
   data,
   highlightedNodeIds,
@@ -61,7 +186,7 @@ export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
 
     // Delay data update to ensure layout is initialized
     const timer = setTimeout(() => {
-      setGraphData(safeData);
+      setGraphData(applyHierarchyLayout(safeData));
     }, 50);
 
     return () => clearTimeout(timer);

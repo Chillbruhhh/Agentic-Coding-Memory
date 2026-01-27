@@ -159,7 +159,6 @@ Found 10 objects:
 ...
 ```
 
-### amp_context - Get task context
 
 ```json
 {

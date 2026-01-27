@@ -1,6 +1,6 @@
 pub mod cache;
-pub mod context;
 pub mod coordination;
+pub mod focus;
 pub mod discovery;
 pub mod files;
 pub mod memory;

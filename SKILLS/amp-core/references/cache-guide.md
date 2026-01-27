@@ -1,5 +1,8 @@
 # Episodic Memory Cache Guide
 
+> **This guide covers HOW the cache tools work** - architecture, tool parameters, and mechanics.
+> For **best practices and patterns**, see `cache-policy.md`.
+
 The cache provides rolling-window episodic memory using block-based storage.
 
 ## Architecture
@@ -41,7 +44,7 @@ Write an item to the current open block.
 ```
 
 **Parameters:**
-- `scope_id` (required): Scope identifier (e.g., "project:amp")
+- `scope_id` (optional): Scope identifier (defaults to run scope)
 - `kind` (required): One of "fact", "decision", "snippet", "warning"
 - `content` (required): The content to store
 - `importance` (optional): 0.0-1.0, default 0.5
@@ -60,7 +63,7 @@ Write an item to the current open block.
 
 ### amp_cache_compact
 
-Manually close the current block and open a new one.
+Manually close the current block and open a new one. If scope_id is omitted, the current run scope is used.
 
 ```json
 {
@@ -79,10 +82,11 @@ Manually close the current block and open a new one.
 3. Summary embedding created for semantic search
 4. New empty block opened with incremented sequence
 
-### amp_cache_search
+### amp_cache_read
 
-Search closed blocks by summary (two-phase retrieval).
+Unified tool for reading from the cache - search, get specific block, or get current block.
 
+**Mode 1: Search (summaries only)**
 ```json
 {
   "scope_id": "project:my-app",
@@ -91,22 +95,16 @@ Search closed blocks by summary (two-phase retrieval).
 }
 ```
 
-**Returns:** Block IDs with summaries and relevance scores.
+**Mode 2: Search with full content**
+```json
+{
+  "scope_id": "project:my-app",
+  "query": "authentication JWT tokens",
+  "include_content": true
+}
+```
 
-**Parameters:**
-- `scope_id` (required): Scope to search within
-- `query` (required): Search query
-- `limit` (optional): Max results, default 5
-
-**Two-phase retrieval pattern:**
-1. Search returns summaries (~200 tokens each)
-2. Evaluate relevance from summaries
-3. Fetch full blocks only for high-relevance matches
-
-### amp_cache_get
-
-Get a specific block by ID or current open block.
-
+**Mode 3: Get specific block**
 ```json
 {
   "scope_id": "project:my-app",
@@ -114,23 +112,56 @@ Get a specific block by ID or current open block.
 }
 ```
 
-**Parameters:**
-- `scope_id` (required): Scope identifier
-- `block_id` (optional): Specific block to retrieve
+**Mode 4: Get current open block**
+```json
+{
+  "scope_id": "project:my-app"
+}
+```
 
-If `block_id` omitted, falls back to legacy memory pack behavior.
+**Parameters:**
+- `scope_id` (required): Scope identifier (e.g., "project:amp")
+- `query` (optional): Search closed blocks by summary
+- `limit` (optional): Max blocks when searching, default 5
+- `include_content` (optional): Fetch full content with search, default false
+- `block_id` (optional): Get specific block by ID
+
+**Behavior matrix:**
+| query | block_id | include_content | Result |
+|-------|----------|-----------------|--------|
+| ✓ | - | false | Search → summaries only |
+| ✓ | - | true | Search → full content |
+| - | ✓ | - | Get specific block |
+| - | - | - | Get current open block |
+
+**Efficiency:** Use `include_content=true` when you know you need the full content - saves a round-trip vs search then get.
 
 ## Workflows
 
-### Session Startup
+### Session Startup (REQUIRED)
+
+**Always read cache at the start of every session** to restore prior context.
 
 ```
-1. amp_cache_search(scope: "project:X", query: "recent work context")
-2. Review returned summaries for relevance
-3. If high-relevance block found:
-     amp_cache_get(block_id: "...")
-4. Otherwise: proceed fresh
+# Recommended: One-shot with full content
+amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
 ```
+
+This ensures continuity across sessions and prevents re-learning what was already discovered.
+
+### After Context Compact (REQUIRED)
+
+When the conversation context is compacted (summarized), **immediately compact the cache** to preserve learnings from the compacted portion:
+
+```
+# 1. Close current block to preserve learnings
+amp_cache_compact(scope_id: "project:X")
+
+# 2. Restore context from cache
+amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+```
+
+**Why this matters**: Context compaction discards conversation history. If you don't compact the cache first, insights from the discarded conversation are lost forever.
 
 ### During Work
 
@@ -162,7 +193,7 @@ amp_cache_compact({ scope_id: "project:X" })
 
 After handoff:
 ```
-amp_cache_search({ scope_id: "project:X", query: "handoff context" })
+amp_cache_read({ scope_id: "project:X", query: "handoff context", include_content: true })
 ```
 
 ## Best Practices

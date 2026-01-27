@@ -9,26 +9,21 @@ Step-by-step patterns for common agent tasks using AMP tools.
 Use when beginning work that needs historical context.
 
 ```
-1. amp_cache_get          -> Get memory pack for scope
-2. amp_context            -> Get relevant symbols/decisions for goal
-3. [Do work]
-4. amp_cache_write        -> Store new insights as you go
-5. amp_write_artifact     -> Record completed changes (type: "changeset")
+1. amp_cache_read          -> Get memory pack for scope
+2. [Do work]
+3. amp_cache_write        -> Store new insights as you go
+4. amp_write_artifact     -> Record completed changes (type: "changeset")
 ```
 
 **Example sequence**:
 ```
-amp_cache_get(scope_id: "project:amp", token_budget: 600)
+amp_cache_read(scope_id: "project:amp", token_budget: 600)
   -> Returns: summary, facts about prior work, relevant decisions
 
-amp_context(goal: "add user authentication", scope: "project:amp", include_decisions: true)
-  -> Returns: related symbols, past auth decisions, relevant files
 
 [Implement authentication]
 
-amp_cache_write(scope_id: "project:amp", items: [
-  {kind: "decision", preview: "Using JWT for stateless auth", importance: 0.8}
-])
+amp_cache_write(scope_id: "project:amp", kind: "decision", content: "Using JWT for stateless auth", importance: 0.8)
 
 amp_write_artifact(
   type: "changeset",
@@ -86,10 +81,10 @@ Use when transferring context to another agent.
 
 ```
 1. amp_cache_write        -> Store critical context before handoff
-2. amp_run_end            -> Close current run with summary
+2. amp_focus (complete)   -> Record what was completed
 3. [New agent starts]
-4. amp_cache_get          -> New agent retrieves context
-5. amp_run_start          -> New agent begins tracking
+4. amp_cache_read         -> New agent retrieves context
+5. amp_focus (set)        -> New agent sets current focus
 ```
 
 **Key principle**: Write compact, actionable facts before handoff. The receiving agent should understand:
@@ -106,11 +101,9 @@ Use when changing code files.
 
 ```
 1. amp_filelog_get        -> Understand file structure first
-2. amp_lease_acquire      -> Lock if multi-agent (optional)
-3. [Make changes]
-4. amp_filelog_update     -> Record what changed
-5. amp_lease_release      -> Release lock (if acquired)
-6. amp_cache_write        -> Cache important patterns discovered
+2. [Make changes]
+3. amp_file_sync          -> Record what changed
+4. amp_cache_write        -> Cache important patterns discovered
 ```
 
 **Example**:
@@ -120,14 +113,13 @@ amp_filelog_get(path: "src/services/cache.rs")
 
 [Modify cache.rs to add TTL support]
 
-amp_filelog_update(
+amp_file_sync(
   path: "src/services/cache.rs",
+  action: "edit",
   summary: "Added configurable TTL with default 30 minutes"
 )
 
-amp_cache_write(scope_id: "project:amp", items: [
-  {kind: "fact", preview: "Cache TTL defaults to 30 minutes", importance: 0.6}
-])
+amp_cache_write(scope_id: "project:amp", kind: "fact", content: "Cache TTL defaults to 30 minutes", importance: 0.6)
 ```
 
 ---
@@ -151,28 +143,15 @@ Use when searching for existing knowledge.
 
 ---
 
-## Workflow 5: Multi-Agent Coordination
+## Workflow 5: Multi-Agent Awareness
 
-Use when multiple agents work on same codebase.
+Use when multiple agents work on the same codebase.
 
 ```
-Agent A:
-1. amp_lease_acquire(resource: "file:auth.rs", agent_id: "agent-a")
-2. [Work on auth.rs]
-3. amp_write_artifact     -> Document changes (type: "changeset")
-4. amp_lease_release      -> Let others access
-
-Agent B (concurrent):
-1. amp_lease_acquire(resource: "file:auth.rs", agent_id: "agent-b")
-   -> Returns CONFLICT if Agent A holds lease
-2. [Wait or work on different file]
-3. Retry after Agent A releases
+1. amp_focus(action: "list") -> See active sessions and current focus
+2. amp_focus(action: "set")  -> Record your current focus
+3. amp_focus(action: "complete") -> Log completed work
 ```
-
-**Lease best practices**:
-- Acquire narrowly (specific file, not whole directory)
-- Release promptly when done
-- Use reasonable durations (300 seconds typical)
 
 ---
 
@@ -182,7 +161,6 @@ Use when making significant technical choices.
 
 ```
 1. amp_query              -> Find related past decisions
-2. amp_context            -> Get context for decision area
 3. [Analyze and decide]
 4. amp_write_artifact     -> Record the ADR (type: "decision")
 5. amp_cache_write        -> Add to short-term memory
@@ -202,21 +180,37 @@ amp_write_artifact(
 
 ---
 
-## Workflow 7: Session Start Ritual
+## Workflow 7: Session Start Ritual (REQUIRED)
 
-Recommended start for any agent session.
+**Always execute at the start of every session.**
 
 ```
-1. amp_status                          -> Verify connectivity
-2. amp_cache_get(scope_id: "project:X")-> Load project context
-3. amp_list(type: "decision", limit: 5)-> Recent decisions
-4. amp_run_start                       -> Begin tracking (optional)
+1. amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+   -> Restore context from prior sessions
+2. amp_status                          -> Verify connectivity (optional)
+3. amp_list(type: "decision", limit: 5) -> Recent decisions (optional)
+4. amp_focus(action: "set", title: "Current task", plan: ["Step 1"]) -> Record focus
 ```
 
 This gives you:
-- Server health confirmation
-- Prior context in ~600 tokens
+- Prior context restored (prevents re-learning)
 - Awareness of recent decisions
+- Clear active focus in the session view
+
+---
+
+## Workflow 7b: After Context Compact (REQUIRED)
+
+**Execute immediately when conversation context is compacted/summarized.**
+
+```
+1. amp_cache_compact(scope_id: "project:X")
+   -> Close current block, preserve learnings from compacted conversation
+2. amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+   -> Restore context from cache
+```
+
+**Why this matters**: When context is compacted, conversation history is discarded. Without compacting the cache first, all insights from that conversation are lost forever.
 
 ---
 
@@ -227,7 +221,8 @@ Recommended end for any agent session.
 ```
 1. amp_cache_write        -> Store important learnings
 2. amp_write_artifact     -> Document any code changes (type: "changeset")
-3. amp_run_end            -> Close run with summary
+3. amp_focus(action: "complete") -> Record completed focus
+4. amp_focus(action: "end") -> Mark session completed
 ```
 
 **What to cache at session end**:
@@ -235,43 +230,3 @@ Recommended end for any agent session.
 - Gotchas discovered
 - Patterns found useful
 - Next steps identified
-
----
-
-## Anti-Patterns to Avoid
-
-### Don't: Cache raw file contents
-```
-# BAD
-amp_cache_write(items: [{kind: "snippet", preview: "[500 lines of code]"}])
-
-# GOOD
-amp_cache_write(items: [{kind: "snippet", preview: "Auth middleware pattern: wrap handler with validate_jwt()"}])
-```
-
-### Don't: Create decisions for minor choices
-```
-# BAD - too granular
-amp_write_artifact(type: "decision", title: "Use camelCase for variable names")
-
-# GOOD - significant impact
-amp_write_artifact(type: "decision", title: "Adopt TypeScript strict mode project-wide")
-```
-
-### Don't: Skip cache writes
-```
-# BAD - knowledge lost at context limit
-[Learn important pattern, don't write to cache]
-
-# GOOD - preserve for future
-amp_cache_write(items: [{kind: "fact", preview: "Pattern: X works well for Y"}])
-```
-
-### Don't: Use huge token budgets
-```
-# BAD - wasteful
-amp_cache_get(token_budget: 5000)
-
-# GOOD - efficient
-amp_cache_get(token_budget: 600)  # Increase to 800-1000 only if needed
-```

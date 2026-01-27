@@ -4,6 +4,61 @@ When and why to create artifacts for effective agent memory.
 
 ---
 
+## What Artifacts Are For
+
+Artifacts are **permanent long-term memory** for anything useful about the codebase. They persist forever and are fully searchable.
+
+**Artifacts can store literally anything that would help a future agent understand the codebase:**
+
+| Category | Example |
+|----------|---------|
+| **User preferences** | "User prefers functional components over class components" |
+| **Project conventions** | "Use snake_case for DB columns, camelCase for API responses" |
+| **Refactoring rationale** | "Extracted AuthService because auth logic was duplicated in 5 places" |
+| **Architectural decisions** | "Chose microservices over monolith for independent scaling" |
+| **Dependency choices** | "Using axum over actix-web for simpler lifetime management" |
+| **Workarounds** | "setTimeout(0) defers execution due to React 18 batching race condition" |
+| **Historical context** | "This module was part of the monolith, extracted in v2.0 migration" |
+| **Production gotchas** | "Rate limiter resets at midnight UTC, not rolling windows" |
+| **Team decisions** | "We avoid ORMs - team prefers raw SQL for performance visibility" |
+| **External constraints** | "API rate limited to 100 req/min - batch operations required" |
+
+**When in doubt, create an artifact.** Artifacts are cheap. Re-learning is expensive.
+
+---
+
+## How Artifacts Work
+
+When you call `amp_write_artifact`, it writes to **three memory layers**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    amp_write_artifact                        │
+│              type + title + content/decision                 │
+└───────────────────────┬─────────────────────────────────────┘
+                        │
+        ┌───────────────┼───────────────┐
+        ▼               ▼               ▼
+┌───────────────┐ ┌───────────────┐ ┌───────────────┐
+│   TEMPORAL    │ │    VECTOR     │ │     GRAPH     │
+│   (SurrealDB) │ │  (Embeddings) │ │ (Relationships│
+├───────────────┤ ├───────────────┤ ├───────────────┤
+│ - Permanent   │ │ - ALWAYS ON   │ │ - linked_files│
+│   storage     │ │ - Semantic    │ │ - linked_     │
+│ - All fields  │ │   search via  │ │   decisions   │
+│ - Audit trail │ │   amp_query   │ │ - project_id  │
+│               │ │ - Auto-index  │ │ - Traceable   │
+└───────────────┘ └───────────────┘ └───────────────┘
+```
+
+**Key behaviors:**
+- **Vector embeddings are ALWAYS generated** - Every artifact is automatically indexed for semantic search via `amp_query`
+- `linked_files: ["src/auth.rs"]` → Creates `modifies` relationship to file node in graph
+- `linked_decisions: ["decision-uuid"]` → Creates `justified_by` relationship
+- `project_id: "my-project"` → Links artifact to project for filtering
+
+---
+
 ## The Core Test
 
 Before creating any artifact, ask:
@@ -12,7 +67,11 @@ Before creating any artifact, ask:
 
 That future agent might be you after context resets, a different agent, or someone months later wondering why something was built this way.
 
-**If yes** → create an artifact. **If unsure** → use cache instead (it expires, artifacts don't).
+**If yes** → create an artifact.
+**If maybe** → create an artifact anyway. Better to have it than re-learn it.
+**If no** → skip it, stick creating cache instead. (code is self-explanatory, common knowledge, etc.)
+
+Remember: Artifacts can store **anything useful** - user preferences, conventions, rationale, workarounds, historical context, external constraints. Don't limit yourself to just decisions and changesets.
 
 ---
 
@@ -38,24 +97,76 @@ That future agent might be you after context resets, a different agent, or someo
 
 ---
 
-### 2. Notes - Non-Obvious Discoveries
+### 2. Notes - Anything Worth Remembering
 
-**Create when:** You learned something that isn't obvious from reading the code.
+**Create when:** You learned something, discovered a preference, or have context worth preserving.
+
+Notes are the **most flexible** artifact type. Use them for anything that doesn't fit decisions or changesets:
 
 | Category | Use When |
 |----------|----------|
 | `warning` | Something will break if not handled correctly |
-| `insight` | Pattern or approach worth preserving |
+| `insight` | Pattern, approach, or discovery worth preserving |
 | `todo` | Work that should be tracked beyond this session |
 | `question` | Uncertainty future agents should investigate |
+| `reference` | User preferences, conventions, external constraints |
+
+**Examples:**
 
 ```json
+// Production gotcha
 {
   "type": "note",
   "title": "Rate limiter resets at midnight UTC",
   "category": "warning",
   "content": "Token bucket resets at midnight UTC, not rolling windows. Use Quota::with_period() for rolling behavior.",
   "tags": ["rate-limiting", "production"]
+}
+```
+
+```json
+// User preference
+{
+  "type": "note",
+  "title": "User prefers verbose error messages",
+  "category": "reference",
+  "content": "User wants detailed error messages with stack traces in development. Include file paths and line numbers when possible.",
+  "tags": ["user-preference", "error-handling"]
+}
+```
+
+```json
+// Project convention
+{
+  "type": "note",
+  "title": "API naming conventions",
+  "category": "reference",
+  "content": "Use kebab-case for API routes (/user-settings), snake_case for DB columns (user_id), camelCase for JSON responses (userId).",
+  "tags": ["conventions", "api"]
+}
+```
+
+```json
+// Refactoring rationale
+{
+  "type": "note",
+  "title": "Why AuthService was extracted",
+  "category": "insight",
+  "content": "Auth logic was duplicated across UserController, AdminController, and APIController. Extracted to single AuthService to ensure consistent token validation and session handling.",
+  "linked_files": ["src/services/auth.rs"],
+  "tags": ["refactoring", "architecture"]
+}
+```
+
+```json
+// Temporary workaround
+{
+  "type": "note",
+  "title": "setTimeout workaround for React 18 batching",
+  "category": "warning",
+  "content": "Using setTimeout(0) in useEffect to defer state updates. React 18 automatic batching causes race condition with external library. Remove when library updates to support React 18.",
+  "linked_files": ["src/hooks/useDataSync.tsx"],
+  "tags": ["workaround", "react", "temporary"]
 }
 ```
 
@@ -179,10 +290,121 @@ Creates graph relationships for `amp_trace` discovery.
 
 ## Summary
 
-Artifacts capture what gets lost when context resets:
+Artifacts are permanent memory for **anything useful about the codebase** - things that get lost when context resets:
 
-1. **Preferences** - Choices and why
-2. **Discoveries** - Non-obvious learnings
-3. **Effective operations** - Patterns that worked
+1. **Preferences** - User and team preferences, conventions, style choices
+2. **Choices** - Decisions made and why, alternatives considered
+3. **Discoveries** - Non-obvious learnings, gotchas, production behavior
+4. **Rationale** - Why refactors happened, why dependencies were chosen
+5. **Context** - Historical background, external constraints, workarounds
+6. **Patterns** - Approaches that worked well, anti-patterns to avoid
 
-**Quality over quantity.** One insightful artifact beats ten noisy ones.
+**Don't limit yourself to the three artifact types.** A "note" can contain anything - user preferences, project conventions, historical context, temporary workarounds, external API quirks, team decisions, or literally anything else worth remembering.
+
+**Quality over quantity** One insightful artifact beats ten noisy ones - but useful artifacts beat zero.
+
+---
+
+## Complete Parameter Reference
+
+### Common Fields (all types)
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `type` | Yes | `decision`, `note`, `changeset`, `filelog` |
+| `title` | Yes | Clear, descriptive title |
+| `project_id` | No | Link to project for filtering |
+| `tags` | No | Array of tags for categorization |
+| `linked_files` | No | Files this artifact relates to (creates graph edges) |
+| `linked_decisions` | No | Related decision artifacts |
+| `linked_objects` | No | Generic object links |
+| `agent_id` | No | Agent identifier for audit trail |
+| `run_id` | No | Link to agent run |
+
+### Decision Fields
+
+```json
+{
+  "type": "decision",
+  "title": "Use Redis for session caching",
+  "status": "accepted",
+  "context": "Need fast session storage with <10ms reads",
+  "decision": "Redis with 24h TTL, cluster mode for HA",
+  "consequences": "Requires Redis deployment, adds infra cost",
+  "alternatives": ["PostgreSQL - too slow", "In-memory - no persistence"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `status` | `proposed`, `accepted`, `deprecated`, `superseded` |
+| `context` | Problem being solved, constraints |
+| `decision` | What was decided |
+| `consequences` | Impact, trade-offs |
+| `alternatives` | Other options considered |
+
+### Note Fields
+
+```json
+{
+  "type": "note",
+  "title": "API rate limits reset at midnight UTC",
+  "category": "warning",
+  "content": "Rate limiter uses fixed windows, not sliding. Burst traffic at midnight may exceed limits.",
+  "tags": ["api", "rate-limiting"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `category` | `warning`, `insight`, `todo`, `question` |
+| `content` | The note content |
+
+### Changeset Fields
+
+```json
+{
+  "type": "changeset",
+  "title": "Add authentication middleware",
+  "description": "JWT validation with refresh token rotation",
+  "files_changed": ["src/middleware/auth.rs", "src/handlers/login.rs"],
+  "diff_summary": "+200 lines. New AuthMiddleware, token refresh endpoint.",
+  "linked_decisions": ["use-jwt-over-sessions"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `description` | What the changeset accomplishes |
+| `files_changed` | Array of modified files |
+| `diff_summary` | Brief summary of changes |
+
+### FileLog Fields (internal use)
+
+```json
+{
+  "type": "filelog",
+  "title": "src/auth/login.rs",
+  "file_path": "src/auth/login.rs",
+  "summary": "Authentication handler with OAuth support",
+  "symbols": ["login", "validate_token", "refresh"],
+  "dependencies": ["oauth2", "jsonwebtoken"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `file_path` | Path to the file |
+| `summary` | AI-generated file summary |
+| `symbols` | Key symbols in file |
+| `dependencies` | File dependencies |
+
+---
+
+## Discovering Artifacts
+
+After creating artifacts, they're discoverable via:
+
+- **`amp_query`** - Semantic search finds artifacts by content similarity
+- **`amp_trace`** - Follow relationships from files to linked artifacts
+- **`amp_list`** - Browse artifacts by type (`type: "decision"`)

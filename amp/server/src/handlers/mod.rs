@@ -2,6 +2,7 @@ pub mod analytics;
 pub mod artifacts;
 pub mod cache;
 pub mod codebase;
+pub mod connections;
 pub mod leases;
 pub mod objects;
 pub mod query;

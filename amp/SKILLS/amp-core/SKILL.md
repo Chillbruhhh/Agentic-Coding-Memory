@@ -1,6 +1,6 @@
 ---
 name: amp-core
-description: Use AMP memory tools for context retrieval, artifact storage, file provenance, and multi-agent coordination. Load this skill when working with persistent memory or shared state.
+description: Use AMP memory tools for knowledge retrieval, artifact storage, file provenance, and multi-agent coordination. Load this skill when working with persistent memory or shared state.
 ---
 # AMP Core Skill
 
@@ -27,7 +27,7 @@ Load this skill when you need to:
 | Which tool to use? | `references/tool-reference.md` |
 | When to create artifacts | `references/artifact-guidelines.md` |
 
-## Tool Categories (17 tools)
+## Tool Categories (16 tools)
 
 ### Episodic Memory Cache (4 tools)
 - `amp_cache_write` - Write item to current block (auto-closes at ~1800 tokens)
@@ -39,10 +39,9 @@ Load this skill when you need to:
 - `amp_file_sync` - Sync file across all 3 layers (temporal, vector, graph)
 - `amp_filelog_get` - Read file audit trail, symbols, dependencies
 
-### Discovery & Search (5 tools)
+### Discovery & Search (4 tools)
 - `amp_status` - Health check and analytics
 - `amp_list` - Browse objects by type
-- `amp_context` - High-signal context for a goal
 - `amp_query` - Hybrid search (text + vector + graph)
 - `amp_trace` - Follow object relationships
 

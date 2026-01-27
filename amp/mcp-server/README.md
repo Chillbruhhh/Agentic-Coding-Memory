@@ -79,11 +79,7 @@ AMP_SERVER_URL=http://localhost:8105 ./amp-mcp-server
 
 ## Available Tools
 
-### Context & Retrieval
-
-**amp_context** - Get high-signal memory bundle for a task
-- Input: `goal`, `scope`, `include_recent`, `include_decisions`
-- Output: Compact bundle with relevant objects
+### Retrieval
 
 **amp_query** - Hybrid search across memory
 - Input: `query`, `mode` (hybrid/text/vector/graph), `filters`, `graph_options`
@@ -147,24 +143,22 @@ AMP_SERVER_URL=http://localhost:8105 ./amp-mcp-server
 1. amp_run_start(goal="Implement auth", repo_id="my-app", agent_name="claude")
    → Returns run_id
 
-2. amp_context(goal="authentication patterns", scope="repo")
-   → Returns relevant decisions and code
 
-3. amp_lease_acquire(resource="file:src/auth.ts", duration=300, agent_id="claude")
+2. amp_lease_acquire(resource="file:src/auth.ts", duration=300, agent_id="claude")
    → Acquires exclusive access
 
-4. [Agent makes changes to auth.ts]
+3. [Agent makes changes to auth.ts]
 
-5. amp_filelog_update(path="src/auth.ts", summary="Added JWT auth", linked_run=run_id)
+4. amp_filelog_update(path="src/auth.ts", summary="Added JWT auth", linked_run=run_id)
    → Documents changes
 
-6. amp_write_decision(title="Use JWT", context="...", decision="...", consequences="...")
+5. amp_write_decision(title="Use JWT", context="...", decision="...", consequences="...")
    → Records architectural decision
 
-7. amp_lease_release(lease_id=lease_id)
+6. amp_lease_release(lease_id=lease_id)
    → Releases file lock
 
-8. amp_run_end(run_id=run_id, status="success", outputs=[decision_id], summary="Auth implemented")
+7. amp_run_end(run_id=run_id, status="success", outputs=[decision_id], summary="Auth implemented")
    → Completes execution tracking
 ```
 
@@ -179,7 +173,6 @@ src/
 ├── config.rs            # Configuration management
 └── tools/               # Tool implementations
     ├── mod.rs           # Tool registry
-    ├── context.rs       # amp_context
     ├── query.rs         # amp_query, amp_trace
     ├── memory.rs        # write_decision, write_changeset, run_start/end
     ├── files.rs         # filelog_get, filelog_update

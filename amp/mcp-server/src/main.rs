@@ -7,6 +7,7 @@ use rmcp::service::{RequestContext, RoleServer, ServiceExt};
 use rmcp::ErrorData as McpError;
 use rmcp::ServerHandler;
 use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod amp_client;
@@ -16,10 +17,23 @@ mod tools;
 use amp_client::AmpClient;
 use config::Config;
 
+/// Connection state tracked per MCP session
+#[derive(Debug, Clone, Default)]
+struct ConnectionState {
+    /// Connection ID returned from register
+    connection_id: Option<String>,
+    /// Current run ID (updated when amp_run_start is called)
+    run_id: Option<String>,
+    /// Whether we've registered with the server
+    registered: bool,
+}
+
 #[derive(Clone)]
 struct AmpMcpHandler {
     client: Arc<AmpClient>,
     config: Arc<Config>,
+    /// Shared connection state for this handler
+    connection_state: Arc<RwLock<ConnectionState>>,
 }
 
 impl ServerHandler for AmpMcpHandler {
@@ -46,10 +60,103 @@ impl ServerHandler for AmpMcpHandler {
     async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParam>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, McpError> {
         use rmcp::model::Tool;
         use std::sync::Arc;
+
+        // === Register connection on handshake (list_tools is called right after init) ===
+        {
+            let mut state = self.connection_state.write().await;
+            if !state.registered {
+                let agent_id = format!(
+                    "mcp-{}",
+                    uuid::Uuid::new_v4()
+                        .to_string()
+                        .split('-')
+                        .next()
+                        .unwrap_or("unknown")
+                );
+                let agent_suffix = agent_id
+                    .split('-')
+                    .nth(1)
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let meta_label = context
+                    .meta
+                    .0
+                    .get("agentName")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string())
+                    .or_else(|| {
+                        context
+                            .meta
+                            .0
+                            .get("agent_name")
+                            .and_then(|value| value.as_str())
+                            .map(|value| value.to_string())
+                    });
+
+                let client_label = meta_label
+                    .or_else(|| {
+                        context
+                            .peer
+                            .peer_info()
+                            .and_then(|info| info.client_info.title.clone())
+                    })
+                    .or_else(|| {
+                        context
+                            .peer
+                            .peer_info()
+                            .map(|info| info.client_info.name.clone())
+                    })
+                    .filter(|label| !label.trim().is_empty());
+
+                // Prefer explicit AMP_AGENT_NAME for UI labeling, fall back to client metadata.
+                let base_label = std::env::var("AMP_AGENT_NAME")
+                    .ok()
+                    .filter(|label| !label.trim().is_empty())
+                    .or(client_label)
+                    .unwrap_or_else(|| self.config.server_name.clone());
+                // Ensure uniqueness per connection by appending a short suffix.
+                let agent_label = format!("{}-{}", base_label, agent_suffix);
+
+                // Auto-create a run so the session appears in the UI immediately
+                let run_payload = serde_json::json!({
+                    "type": "run",
+                    "input_summary": format!("{} session", agent_label),
+                    "status": "running",
+                    "provenance": {
+                        "agent": agent_label.clone(),
+                        "summary": "MCP session auto-created on connect"
+                    }
+                });
+
+                if let Ok(run_response) = self.client.create_object(run_payload).await {
+                    if let Some(run_id) = run_response.get("id").and_then(|v| v.as_str()) {
+                        let clean_run_id = run_id.trim_start_matches("objects:").to_string();
+                        state.run_id = Some(clean_run_id.clone());
+                        tracing::info!("Auto-created run for MCP session: {}", clean_run_id);
+
+                        let register_payload = serde_json::json!({
+                            "agent_id": agent_id,
+                            "agent_name": agent_label,
+                            "run_id": clean_run_id,
+                            "ttl_seconds": 600
+                        });
+
+                        if let Ok(response) = self.client.register_connection(register_payload).await {
+                            if let Some(conn_id) = response.get("connection_id").and_then(|v| v.as_str()) {
+                                state.connection_id = Some(conn_id.to_string());
+                                tracing::info!("Registered connection on handshake: {} -> run: {}", conn_id, clean_run_id);
+                            }
+                        }
+                    }
+                }
+                state.registered = true;
+            }
+        }
 
         // Helper to convert schema to Arc<Map> (schemars 1.0 API)
         let to_schema =
@@ -93,16 +200,6 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
-                    name: "amp_context".into(),
-                    description: Some("Get high-signal memory bundle for a task".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::context::AmpContextInput)),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
                     name: "amp_query".into(),
                     description: Some("Search AMP memory with hybrid retrieval".into()),
                     input_schema: to_schema(schemars::schema_for!(tools::query::AmpQueryInput)),
@@ -137,19 +234,9 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
-                    name: "amp_run_start".into(),
-                    description: Some("Start tracking an agent execution".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpRunStartInput)),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_run_end".into(),
-                    description: Some("Complete an agent execution".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::memory::AmpRunEndInput)),
+                    name: "amp_focus".into(),
+                    description: Some("Manage agent focus/session state (list, get, set, complete, end)".into()),
+                    input_schema: to_schema(schemars::schema_for!(tools::focus::AmpFocusInput)),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -182,19 +269,6 @@ impl ServerHandler for AmpMcpHandler {
                     title: None,
                     output_schema: None,
                 },
-                // Legacy tool kept for backward compatibility
-                Tool {
-                    name: "amp_filelog_update".into(),
-                    description: Some("Update file log after changes (legacy - use amp_file_sync)".into()),
-                    input_schema: to_schema(schemars::schema_for!(
-                        tools::files::AmpFilelogUpdateInput
-                    )),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
                 Tool {
                     name: "amp_file_content_get".into(),
                     description: Some("Get stored file content from indexed chunks".into()),
@@ -212,30 +286,6 @@ impl ServerHandler for AmpMcpHandler {
                     description: Some("Resolve canonical stored path for a file input".into()),
                     input_schema: to_schema(schemars::schema_for!(
                         tools::files::AmpFilePathResolveInput
-                    )),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_lease_acquire".into(),
-                    description: Some("Acquire a resource lease for coordination".into()),
-                    input_schema: to_schema(schemars::schema_for!(
-                        tools::coordination::AmpLeaseAcquireInput
-                    )),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_lease_release".into(),
-                    description: Some("Release a resource lease".into()),
-                    input_schema: to_schema(schemars::schema_for!(
-                        tools::coordination::AmpLeaseReleaseInput
                     )),
                     annotations: None,
                     icons: None,
@@ -272,23 +322,13 @@ impl ServerHandler for AmpMcpHandler {
                     output_schema: None,
                 },
                 Tool {
-                    name: "amp_cache_search".into(),
+                    name: "amp_cache_read".into(),
                     description: Some(
-                        "Search cache blocks by summary (returns top 5 block summaries for two-phase retrieval)".into(),
+                        "Read from episodic cache - search blocks, get specific block, or get current block. Modes: (1) query param → search closed blocks by summary, (2) block_id param → get specific block with full content, (3) neither → get current open block. Use include_content=true with query to fetch full content of matching blocks in one call.".into(),
                     ),
                     input_schema: to_schema(schemars::schema_for!(
-                        tools::cache::AmpCacheSearchInput
+                        tools::cache::AmpCacheReadInput
                     )),
-                    annotations: None,
-                    icons: None,
-                    meta: None,
-                    title: None,
-                    output_schema: None,
-                },
-                Tool {
-                    name: "amp_cache_get".into(),
-                    description: Some("Get specific cache block by ID or current open block".into()),
-                    input_schema: to_schema(schemars::schema_for!(tools::cache::AmpCacheGetInput)),
                     annotations: None,
                     icons: None,
                     meta: None,
@@ -313,6 +353,25 @@ impl ServerHandler for AmpMcpHandler {
         let to_invalid_params =
             |e: serde_json::Error| McpError::invalid_params(e.to_string(), None);
 
+        // === Connection tracking: send heartbeat on each tool call ===
+        {
+            let state = self.connection_state.read().await;
+            if let Some(conn_id) = &state.connection_id {
+                let heartbeat_payload = serde_json::json!({
+                    "connection_id": conn_id,
+                    "run_id": state.run_id,
+                    "ttl_seconds": 600
+                });
+
+                let client_clone = client.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = client_clone.connection_heartbeat(heartbeat_payload).await {
+                        tracing::debug!("Heartbeat failed (non-fatal): {}", e);
+                    }
+                });
+            }
+        }
+
         let contents = match params.name.as_ref() {
             "amp_status" => tools::discovery::handle_amp_status(client)
                 .await
@@ -322,14 +381,6 @@ impl ServerHandler for AmpMcpHandler {
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
                 tools::discovery::handle_amp_list(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
-            "amp_context" => {
-                let input: tools::context::AmpContextInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::context::handle_amp_context(client, input)
                     .await
                     .map_err(to_internal_error)?
             }
@@ -357,19 +408,15 @@ impl ServerHandler for AmpMcpHandler {
                     .await
                     .map_err(to_internal_error)?
             }
-            "amp_run_start" => {
-                let input: tools::memory::AmpRunStartInput =
+            "amp_focus" => {
+                let input: tools::focus::AmpFocusInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::memory::handle_run_start(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
-            "amp_run_end" => {
-                let input: tools::memory::AmpRunEndInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::memory::handle_run_end(client, input)
+                let run_id = {
+                    let state = self.connection_state.read().await;
+                    state.run_id.clone()
+                };
+                tools::focus::handle_focus(client, run_id.as_deref(), input)
                     .await
                     .map_err(to_internal_error)?
             }
@@ -389,14 +436,6 @@ impl ServerHandler for AmpMcpHandler {
                     .await
                     .map_err(to_internal_error)?
             }
-            "amp_filelog_update" => {
-                let input: tools::files::AmpFilelogUpdateInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::files::handle_filelog_update(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
             "amp_file_content_get" => {
                 let input: tools::files::AmpFileContentGetInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
@@ -413,27 +452,15 @@ impl ServerHandler for AmpMcpHandler {
                     .await
                     .map_err(to_internal_error)?
             }
-            "amp_lease_acquire" => {
-                let input: tools::coordination::AmpLeaseAcquireInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::coordination::handle_lease_acquire(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
-            "amp_lease_release" => {
-                let input: tools::coordination::AmpLeaseReleaseInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::coordination::handle_lease_release(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
             "amp_cache_write" => {
                 let input: tools::cache::AmpCacheWriteInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::cache::handle_cache_write(client, input)
+                let run_id = {
+                    let state = self.connection_state.read().await;
+                    state.run_id.clone()
+                };
+                tools::cache::handle_cache_write(client, run_id.as_deref(), input)
                     .await
                     .map_err(to_internal_error)?
             }
@@ -441,23 +468,19 @@ impl ServerHandler for AmpMcpHandler {
                 let input: tools::cache::AmpCacheCompactInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::cache::handle_cache_compact(client, input)
+                let run_id = {
+                    let state = self.connection_state.read().await;
+                    state.run_id.clone()
+                };
+                tools::cache::handle_cache_compact(client, run_id.as_deref(), input)
                     .await
                     .map_err(to_internal_error)?
             }
-            "amp_cache_search" => {
-                let input: tools::cache::AmpCacheSearchInput =
+            "amp_cache_read" => {
+                let input: tools::cache::AmpCacheReadInput =
                     serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
                         .map_err(to_invalid_params)?;
-                tools::cache::handle_cache_search(client, input)
-                    .await
-                    .map_err(to_internal_error)?
-            }
-            "amp_cache_get" => {
-                let input: tools::cache::AmpCacheGetInput =
-                    serde_json::from_value(serde_json::to_value(params.arguments).unwrap())
-                        .map_err(to_invalid_params)?;
-                tools::cache::handle_cache_get(client, input)
+                tools::cache::handle_cache_read(client, input)
                     .await
                     .map_err(to_internal_error)?
             }
@@ -509,12 +532,20 @@ async fn run_http_transport(handler: AmpMcpHandler, port: u16) -> Result<()> {
     // Create config
     let config = StreamableHttpServerConfig::default();
 
-    // Clone handler for the factory
-    let handler_clone = handler.clone();
-
-    // Create the streamable HTTP service with a factory function
-    let service =
-        StreamableHttpService::new(move || Ok(handler_clone.clone()), session_manager, config);
+    // Create the streamable HTTP service with a factory function.
+    // Each connection gets its own connection_state so sessions don't collapse.
+    let handler_base = handler.clone();
+    let service = StreamableHttpService::new(
+        move || {
+            Ok(AmpMcpHandler {
+                client: handler_base.client.clone(),
+                config: handler_base.config.clone(),
+                connection_state: Arc::new(RwLock::new(ConnectionState::default())),
+            })
+        },
+        session_manager,
+        config,
+    );
 
     // Create the axum router with the service
     let app = axum::Router::new().route("/mcp", axum::routing::any_service(service));
@@ -550,10 +581,11 @@ async fn main() -> Result<()> {
     )?);
     tracing::info!("AMP client initialized");
 
-    // Create handler
+    // Create handler with connection state
     let handler = AmpMcpHandler {
         client: client.clone(),
         config: config.clone(),
+        connection_state: Arc::new(RwLock::new(ConnectionState::default())),
     };
 
     tracing::info!("MCP handler created");

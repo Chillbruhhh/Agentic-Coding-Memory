@@ -248,7 +248,26 @@ fn api_routes() -> Router<AppState> {
         .route("/cache/block/write", post(handlers::cache::block_write))
         .route("/cache/block/compact", post(handlers::cache::block_compact))
         .route("/cache/block/search", post(handlers::cache::block_search))
+        .route("/cache/block/current/:scope_id", get(handlers::cache::block_current))
         .route("/cache/block/:id", get(handlers::cache::block_get))
+        // Connection tracking endpoints - real-time agent connection status
+        .route(
+            "/connections/register",
+            post(handlers::connections::register_connection),
+        )
+        .route(
+            "/connections/heartbeat",
+            post(handlers::connections::heartbeat),
+        )
+        .route(
+            "/connections/disconnect",
+            post(handlers::connections::disconnect),
+        )
+        .route("/connections", get(handlers::connections::list_connections))
+        .route(
+            "/connections/cleanup",
+            post(handlers::connections::cleanup_expired),
+        )
 }
 
 async fn track_latency(

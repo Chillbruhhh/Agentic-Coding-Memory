@@ -1,4 +1,4 @@
-﻿// Graph data transformation utilities for AMP Console
+// Graph data transformation utilities for AMP Console
 export interface AmpObject {
   id: string;
   type: string;
@@ -89,9 +89,32 @@ export const transformAmpToGraph = (
   const normalizeId = (value: string) =>
     value
       .replace(/^objects:/, '')
-      .replace(/[âŸ¨âŸ©]/g, '')
+      .replace(/[⟨⟩]/g, '')
       .replace(/[`]/g, '')
       .replace(/[\u27E8\u27E9]/g, '');
+
+  const getDisplayName = (obj: AmpObject) => {
+    const rawName = obj.name || (obj as any).title || (obj.kind || obj.type || 'artifact');
+    const kind = (obj.kind || obj.type || '').toLowerCase();
+    const path = obj.path;
+    if (path && (kind === 'file' || kind === 'directory')) {
+      const normalized = path.replace(/\\/g, '/');
+      const parts = normalized.split('/').filter(Boolean);
+      if (parts.length > 0) {
+        return parts[parts.length - 1];
+      }
+    }
+    if (typeof rawName === 'string') {
+      const normalized = rawName.replace(/\\/g, '/');
+      if (normalized.includes('/')) {
+        const parts = normalized.split('/').filter(Boolean);
+        if (parts.length > 0) {
+          return parts[parts.length - 1];
+        }
+      }
+    }
+    return rawName;
+  };
 
   const nodes: GraphNode[] = objects
     .filter(obj => {
@@ -101,7 +124,7 @@ export const transformAmpToGraph = (
     })
     .map(obj => ({
       id: normalizeId(obj.id), // Normalize to match relationship format
-      name: obj.name || (obj as any).title || (obj.kind || obj.type || 'artifact'),
+      name: getDisplayName(obj),
       kind: (obj.kind || obj.type) as string,
       path: obj.path,
       language: obj.language,
@@ -125,7 +148,25 @@ export const transformAmpToGraph = (
         console.log('Missing target object:', targetObj?.kind, targetObj?.type, targetObj?.name);
       }
       
-      return sourceExists && targetExists;
+      if (!sourceExists || !targetExists) return false;
+
+      const sourceNode = nodes.find(n => n.id === rel.in);
+      const targetNode = nodes.find(n => n.id === rel.out);
+      if (!sourceNode || !targetNode) return false;
+
+      const sourceKind = (sourceNode.kind || '').toLowerCase();
+      const targetKind = (targetNode.kind || '').toLowerCase();
+      const relType = (rel.relation_type || '').toLowerCase();
+
+      // Hide project <-> file links to keep hierarchy clean.
+      if (relType === 'defined_in') {
+        const isProjectFile =
+          (sourceKind === 'project' && targetKind === 'file') ||
+          (sourceKind === 'file' && targetKind === 'project');
+        if (isProjectFile) return false;
+      }
+
+      return true;
     })
     .map(rel => ({
       source: rel.in,   // 3d-force-graph expects 'source'

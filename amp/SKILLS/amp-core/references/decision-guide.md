@@ -38,10 +38,6 @@ Do you need compact working memory?
     ├─ YES: amp_query
     │   └─ Use for: finding specific knowledge, semantic search
     │
-    └─ NO: Do you want context for a goal?
-        ├─ YES: amp_context
-        │   └─ Use for: starting new task, need relevant background
-        │
         └─ NO: Just browsing?
             └─ amp_list
                 └─ Use for: exploring what exists
@@ -224,7 +220,6 @@ Is this:
 ├─────────────────────────────────────────────────────────┤
 │ SEARCH                                                   │
 │   amp_query(query, mode="hybrid", limit=5)              │
-│   amp_context(goal, scope, include_decisions=false)     │
 │   amp_list(type, limit=10)                              │
 │   amp_trace(object_id, depth=2)                         │
 ├─────────────────────────────────────────────────────────┤

@@ -31,11 +31,16 @@ Load `amp/SKILLS/amp-core/SKILL.md` when:
 ### Skill file priorities
 
 1. `SKILL.md` - Always read first (overview + navigation)
-2. `references/decision-guide.md` - When choosing which tool
-3. `references/tool-reference.md` - When need parameter details
-4. `references/workflows.md` - When following patterns
-5. `references/examples.md` - When need concrete examples
-6. `references/cache-policy.md` - When working with cache
+2. `references/tool-map.md` - Quick reference for which tool to use
+3. `references/decision-guide.md` - When choosing between approaches
+4. `references/tool-reference.md` - When need parameter details
+
+**Task-specific guides:**
+5. `references/artifact-guidelines.md` - When creating decisions/notes/changesets
+6. `references/file-sync-guide.md` - When modifying files (provenance tracking)
+7. `references/cache-guide.md` - When working with episodic cache
+8. `references/workflows.md` - When following multi-step patterns
+9. `references/examples.md` - When need concrete examples
 ```
 
 ## Alternative: Minimal Block

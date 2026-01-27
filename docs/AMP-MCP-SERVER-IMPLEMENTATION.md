@@ -38,7 +38,6 @@ Successfully implemented a complete Model Context Protocol (MCP) server for AMP,
 ### Tools Implemented (10 Total)
 
 #### Context & Retrieval (3 tools)
-1. **amp_context** - High-signal memory bundle
    - Inputs: goal, scope, include_recent, include_decisions
    - Uses hybrid query mode
    - Returns compact, relevant results
@@ -130,7 +129,6 @@ The tools enable a complete agent development workflow:
 
 ```
 1. amp_run_start → Track session
-2. amp_context → Load relevant memory
 3. amp_lease_acquire → Lock resources
 4. [Agent makes changes]
 5. amp_filelog_update → Document changes

@@ -124,7 +124,6 @@ Output: { "id": "run_abc123" }
 ### Example 2: Get Context for Task
 
 ```
-Agent: Use amp_context
 Input: {
   "goal": "authentication patterns and security",
   "scope": "repo",
@@ -333,7 +332,6 @@ Use `amp_query` to check for existing decisions/patterns.
 
 ## Performance Tips
 
-- Use `amp_context` for broad searches
 - Use `amp_query` with specific filters for targeted searches
 - Set appropriate `limit` values to avoid large responses
 - Use leases only when necessary (they add overhead)

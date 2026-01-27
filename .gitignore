@@ -34,8 +34,10 @@ Thumbs.db
 # Temporary files
 GIT_ADD_INSTRUCTIONS.md
 
-
+# Python
 .venv
 venv
 
+
+# Collected texts
 collected-texts/

@@ -20,7 +20,9 @@ impl Config {
                 .unwrap_or_else(|_| "30".to_string())
                 .parse()
                 .context("Invalid AMP_SERVER_TIMEOUT")?,
-            server_name: env::var("MCP_SERVER_NAME")
+            server_name: env::var("AMP_AGENT_NAME")
+                .or_else(|_| env::var("AGENT_NAME"))
+                .or_else(|_| env::var("MCP_SERVER_NAME"))
                 .unwrap_or_else(|_| "amp-mcp-server".to_string()),
             server_version: env::var("MCP_SERVER_VERSION")
                 .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),

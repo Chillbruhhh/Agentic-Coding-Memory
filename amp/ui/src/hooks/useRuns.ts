@@ -17,6 +17,13 @@ export interface RunSummary {
 }
 
 export interface RunDetail extends RunSummary {
+  focus?: {
+    title?: string;
+    plan?: string[];
+    status?: string;
+    started_at?: string;
+    completed_at?: string;
+  };
   outputs?: Array<{
     type?: string;
     content?: string;

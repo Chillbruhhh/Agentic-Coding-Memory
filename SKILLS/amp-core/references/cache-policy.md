@@ -1,5 +1,8 @@
 # Cache Policy (Semantic Cache / Unity Layer)
 
+> **This guide covers BEST PRACTICES** - what to cache, token budgets, and multi-agent patterns.
+> For **tool mechanics and parameters**, see `cache-guide.md`.
+
 Guidelines for effective use of AMP's token-efficient short-term memory.
 
 ---
@@ -16,7 +19,7 @@ The semantic cache (Unity Layer) provides:
 
 ### Memory Pack Structure
 
-When you call `amp_cache_get`, you receive a Memory Pack:
+When you call `amp_cache_read`, you receive a Memory Pack:
 
 ```
 ┌────────────────────────────────────────┐
@@ -116,24 +119,20 @@ If budget is 600:
 ```json
 {
   "kind": "fact",
-  "preview": "Short summary (1-2 sentences)",
-  "facts": [
-    "Atomic fact 1",
-    "Atomic fact 2"
-  ],
+  "content": "Cache dedup uses 0.92 cosine similarity threshold",
   "importance": 0.7,
-  "artifact_id": "optional-link-to-artifact"
+  "file_ref": "src/cache/dedup.rs"
 }
 ```
 
 ### Writing Guidelines
 
-**Preview**:
+**Content**:
 - Keep to 1-2 sentences
 - Make it scannable
 - Include key terms
 
-**Facts array**:
+
 - 1-3 atomic facts per item
 - Each fact stands alone
 - No redundancy with preview
@@ -150,16 +149,14 @@ If budget is 600:
 // GOOD - Compact, actionable
 {
   "kind": "fact",
-  "preview": "Cache dedup uses 0.92 cosine similarity threshold",
-  "facts": ["Similar items merged, not duplicated"],
+  "content": "Cache dedup uses 0.92 cosine similarity threshold",
   "importance": 0.7
 }
 
 // BAD - Too verbose
 {
   "kind": "fact",
-  "preview": "I discovered that the caching system in this application uses a cosine similarity threshold of 0.92 to determine whether two items should be considered duplicates, which means that if two items have vectors that are more than 92% similar...",
-  "facts": ["The threshold is 0.92", "Cosine similarity is used", "Duplicates are merged", "This affects deduplication"],
+  "content": "I discovered that the caching system in this application uses a cosine similarity threshold of 0.92 to determine whether two items should be considered duplicates, which means that if two items have vectors that are more than 92% similar...",
   "importance": 0.5
 }
 ```
@@ -227,7 +224,7 @@ POST /v1/cache/gc
 
 ### Size Limits
 
-- Preview: Keep under 200 characters
+- Content: Keep under 200 characters
 - Facts array: 1-3 items
 - Total item: Estimate 50-100 tokens
 
@@ -242,7 +239,7 @@ Agent A writes:
   amp_cache_write(scope_id: "project:amp", items: [...])
 
 Agent B reads:
-  amp_cache_get(scope_id: "project:amp")
+  amp_cache_read(scope_id: "project:amp")
   → Gets items from Agent A
 ```
 
@@ -269,7 +266,7 @@ Agent A ending:
    ])
 
 Agent B starting:
-1. amp_cache_get(scope_id: "project:X")
+1. amp_cache_read(scope_id: "project:X")
    → Receives Agent A's context
 ```
 

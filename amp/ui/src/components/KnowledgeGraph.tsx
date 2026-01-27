@@ -146,7 +146,7 @@ export const KnowledgeGraph: React.FC = () => {
           ? selectedNode.id
           : (selectedNode.path || selectedNode.name);
         if (selectedNode.kind === 'project' && (!lookup || lookup === '.')) {
-          throw new Error('Project root path unavailable. Reindex to store an absolute path.');
+          throw new Error('Project id unavailable. Reindex to store a valid project node.');
         }
         const response = await fetch(`http://localhost:8105/v1/codebase/file-log-objects/${encodeURIComponent(lookup)}`);
         if (!response.ok) {

@@ -6,12 +6,66 @@ Real-world examples for each AMP tool with complete parameters and expected outp
 
 ## Cache Tools
 
-### amp_cache_get - Load project context
+### amp_cache_read - Search with summaries
 
 ```json
 {
   "scope_id": "project:amp",
-  "token_budget": 600
+  "query": "authentication implementation",
+  "limit": 5
+}
+```
+
+**Output**:
+```
+Cache search results for: "authentication implementation"
+--------------------------------------------------
+
+1. Block: cache_block:abc123... (relevance: 0.72)
+   Created: 2026-01-23T10:30:00Z
+   Summary: [decision] Using JWT for auth; [fact] Token expiry is 24h...
+
+Tip: Use include_content=true to fetch full block content.
+```
+
+### amp_cache_read - Search with full content
+
+```json
+{
+  "scope_id": "project:amp",
+  "query": "authentication implementation",
+  "include_content": true
+}
+```
+
+**Output**:
+```
+Cache search results for: "authentication implementation" (with content)
+==================================================
+
+[1/2] Block: cache_block:abc123... (relevance: 0.72)
+----------------------------------------
+Summary: [decision] Using JWT for auth; [fact] Token expiry is 24h
+
+  * [decision] Using JWT for stateless authentication
+  - [fact] Token expiry is 24 hours with refresh tokens
+  > [snippet] validate_jwt() in src/middleware/auth.rs
+```
+
+### amp_cache_read - Get specific block
+
+```json
+{
+  "scope_id": "project:amp",
+  "block_id": "cache_block:abc123..."
+}
+```
+
+### amp_cache_read - Get current open block
+
+```json
+{
+  "scope_id": "project:amp"
 }
 ```
 
@@ -19,70 +73,27 @@ Real-world examples for each AMP tool with complete parameters and expected outp
 ```
 Memory Pack for scope: project:amp
 --------------------------------------------------
-Summary: AMP is an Agentic Memory Protocol with SurrealDB backend.
-
-Facts:
-  - Cache uses chars/4 for token estimation
-  - Semantic dedup threshold is 0.92 cosine similarity
-  - Default TTL is 30 minutes
-
-Decisions:
-  * Use SurrealDB for multi-model storage
-  * Implement cache as Unity Layer for token efficiency
-
 Token count: 487 / 600
 Version: 12
 Fresh: yes
 ```
 
-### amp_cache_get - With semantic query
+### amp_cache_write - Store an item
 
 ```json
 {
   "scope_id": "project:amp",
-  "token_budget": 800,
-  "query": "authentication implementation"
-}
-```
-
-Results prioritized by relevance to "authentication implementation".
-
-### amp_cache_write - Store multiple items
-
-```json
-{
-  "scope_id": "project:amp",
-  "items": [
-    {
-      "kind": "fact",
-      "preview": "CacheService creates embeddings for semantic dedup",
-      "facts": [
-        "Embeddings generated via EmbeddingService",
-        "1536-dimension vectors stored in MTREE index"
-      ],
-      "importance": 0.7
-    },
-    {
-      "kind": "warning",
-      "preview": "Cache queries timeout after 5 seconds",
-      "facts": ["Default timeout is 5s, configurable"],
-      "importance": 0.8
-    },
-    {
-      "kind": "decision",
-      "preview": "Using POST for cache/pack endpoint",
-      "facts": ["POST allows query embedding in body"],
-      "importance": 0.6
-    }
-  ]
+  "kind": "fact",
+  "content": "CacheService creates embeddings for semantic dedup",
+  "importance": 0.7,
+  "file_ref": "src/services/cache.rs"
 }
 ```
 
 **Output**:
 ```
-Cache write complete: 2 items written, 1 merged with existing
+Cache write complete: item written
 ```
-(One item had >0.92 similarity to existing, so it was merged.)
 
 ---
 
@@ -156,89 +167,6 @@ Found 10 objects:
 1. Symbol: get_pack (function) in src/services/cache.rs
 2. Symbol: write_items (function) in src/services/cache.rs
 3. Symbol: handle_query (function) in src/handlers/query.rs
-...
-```
-
-### amp_context - Get task context
-
-```json
-{
-  "goal": "implement rate limiting for API",
-  "scope": "project:amp",
-  "include_decisions": true
-}
-```
-
-**Output**:
-```
-Context for: implement rate limiting for API
-Scope: project:amp
-
-Found 8 relevant items:
-
-Key Symbols:
-  1. middleware (module) in src/middleware/mod.rs
-  2. rate_limit (function) in src/middleware/rate_limit.rs
-  3. AppState (struct) in src/main.rs
-
-Relevant Decisions:
-  1. Use tower middleware for request processing (accepted)
-
-Related Files:
-  1. src/middleware/mod.rs
-  2. src/config.rs
-```
-
-### amp_query - Hybrid search
-
-```json
-{
-  "query": "error handling patterns",
-  "mode": "hybrid",
-  "filters": {"type": "symbol"},
-  "limit": 5
-}
-```
-
-**Output**:
-```
-Hybrid Query (RRF): error handling patterns
-
-Found 5 results (ranked by Reciprocal Rank Fusion):
-
-1. Symbol: handle_error (function) in src/handlers/error.rs
-   id: 8a3b2c1d
-   RRF Score: 0.4521 (text:0.312, vector:0.289)
-
-2. Symbol: ErrorResponse (struct) in src/models/error.rs
-   id: 9d4e5f6a
-   RRF Score: 0.3892 (text:0.201, vector:0.412)
-
-3. Symbol: map_err (function) in src/utils/result.rs
-   id: 1e2f3a4b
-   RRF Score: 0.3156 (text:0.156, vector:0.298)
-...
-```
-
-### amp_trace - Follow relationships
-
-```json
-{
-  "object_id": "8a3b2c1d-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-  "depth": 2
-}
-```
-
-**Output**:
-```
-Trace for object: 8a3b2c1d-... (depth: 2)
-
-Found 6 relationships:
-
-1. 8a3b2c1d -> 9d4e5f6a (calls)
-2. 8a3b2c1d -> 1e2f3a4b (depends_on)
-3. 8a3b2c1d -> abc12345 (defined_in)
-4. 9d4e5f6a -> def67890 (implements)
 ...
 ```
 
@@ -394,13 +322,13 @@ Artifact created: {
 }
 ```
 
-### amp_filelog_update - Record change
+### amp_file_sync - Record change
 
 ```json
 {
   "path": "src/services/cache.rs",
-  "summary": "Added garbage collection method for expired items",
-  "linked_changeset": "abc123-def456"
+  "action": "edit",
+  "summary": "Added garbage collection method for expired items"
 }
 ```
 
@@ -413,83 +341,67 @@ Artifact created: {
 }
 ```
 
----
-
-## Run Tracking
-
-### amp_run_start - Begin execution
+### amp_file_path_resolve - Resolve ambiguous path
 
 ```json
+{ "path": "utils.py" }
+```
+
+**Output (resolved)**:
+```json
 {
-  "goal": "Implement user authentication feature",
-  "repo_id": "project:myapp",
-  "agent_name": "claude-code"
+  "input_path": "utils.py",
+  "normalized_path": "utils.py",
+  "tried_paths": ["utils.py", "src/utils.py"],
+  "resolved_path": "c:/project/src/utils.py"
 }
 ```
 
-**Output**:
-```
-Run started: {
-  "id": "run-12345678",
-  "status": "running",
-  "started_at": "2026-01-23T01:40:00Z"
-}
-```
-
-### amp_run_end - Complete execution
-
+**Output (ambiguous)**:
 ```json
 {
-  "run_id": "run-12345678",
-  "status": "completed",
-  "outputs": [
-    "Created auth.rs with JWT validation",
-    "Added login/logout endpoints",
-    "Updated middleware chain"
-  ],
-  "summary": "Authentication implemented with JWT tokens. Users can login via /api/auth/login and logout via /api/auth/logout. Protected routes require Bearer token."
+  "input_path": "utils.py",
+  "normalized_path": "utils.py",
+  "tried_paths": ["utils.py"],
+  "resolved_path": null,
+  "error": "Multiple files match"
 }
 ```
 
 ---
 
-## Coordination
 
-### amp_lease_acquire - Lock resource
+## Focus Tracking
 
-```json
-{
-  "resource": "file:src/auth.rs",
-  "duration": 300,
-  "agent_id": "claude-code-1"
-}
-```
-
-**Output** (success):
-```
-Lease acquired: {
-  "lease_id": "lease-abc123",
-  "resource": "file:src/auth.rs",
-  "holder": "claude-code-1",
-  "expires_at": "2026-01-23T01:45:00Z"
-}
-```
-
-**Output** (conflict):
-```
-HTTP 409 Conflict
-Resource already leased by another agent
-```
-
-### amp_lease_release - Release lock
+### amp_focus - Set focus
 
 ```json
 {
-  "lease_id": "lease-abc123"
+  "action": "set",
+  "title": "Implement cache UI",
+  "plan": [
+    "Review CachePanel",
+    "Add scope selector",
+    "Verify scroll stability"
+  ]
 }
 ```
 
-**Output**:
+### amp_focus - Complete focus
+
+```json
+{
+  "action": "complete",
+  "summary": "Cache UI updated with scope selector and stable scroll.",
+  "files_changed": ["amp/ui/src/components/CachePanel.tsx"],
+  "plan": [
+    "Review CachePanel",
+    "Add scope selector",
+    "Verify scroll stability"
+  ]
+}
 ```
-Lease released: {"success": true, "message": "Lease released"}
-```
+
+
+
+

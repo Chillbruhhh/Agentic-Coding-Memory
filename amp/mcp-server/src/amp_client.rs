@@ -263,4 +263,75 @@ impl AmpClient {
         let data = response.json().await?;
         Ok(data)
     }
+
+    pub async fn cache_block_current(&self, scope_id: &str) -> Result<Option<Value>> {
+        let encoded = urlencoding::encode(scope_id);
+        let url = format!("{}/v1/cache/block/current/{}", self.base_url, encoded);
+        let response = self.client.get(&url).send().await?;
+        let status = response.status();
+
+        if status.is_success() {
+            let data = response.json().await?;
+            return Ok(Some(data));
+        }
+
+        if status.as_u16() == 404 {
+            return Ok(None);
+        }
+
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("cache_block_current failed ({}): {}", status, body);
+    }
+
+    // Connection tracking endpoints
+
+    /// Register a new agent connection
+    pub async fn register_connection(&self, payload: Value) -> Result<Value> {
+        let url = format!("{}/v1/connections/register", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("register_connection failed ({}): {}", status, body);
+        }
+        let data = response.json().await?;
+        Ok(data)
+    }
+
+    /// Send heartbeat to keep connection alive
+    pub async fn connection_heartbeat(&self, payload: Value) -> Result<()> {
+        let url = format!("{}/v1/connections/heartbeat", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("connection_heartbeat failed ({}): {}", status, body);
+        }
+        Ok(())
+    }
+
+    /// Disconnect the connection
+    pub async fn disconnect_connection(&self, payload: Value) -> Result<()> {
+        let url = format!("{}/v1/connections/disconnect", self.base_url);
+        let response = self.client.post(&url).json(&payload).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("disconnect_connection failed ({}): {}", status, body);
+        }
+        Ok(())
+    }
+
+    /// List active connections
+    pub async fn list_connections(&self) -> Result<Value> {
+        let url = format!("{}/v1/connections", self.base_url);
+        let response = self.client.get(&url).send().await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("list_connections failed ({}): {}", status, body);
+        }
+        let data = response.json().await?;
+        Ok(data)
+    }
 }

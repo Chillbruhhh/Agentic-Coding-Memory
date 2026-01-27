@@ -10,7 +10,6 @@ Use when beginning work that needs historical context.
 
 ```
 1. amp_cache_get          -> Get memory pack for scope
-2. amp_context            -> Get relevant symbols/decisions for goal
 3. [Do work]
 4. amp_cache_write        -> Store new insights as you go
 5. amp_write_artifact     -> Record completed changes (type: "changeset")
@@ -21,7 +20,6 @@ Use when beginning work that needs historical context.
 amp_cache_get(scope_id: "project:amp", token_budget: 600)
   -> Returns: summary, facts about prior work, relevant decisions
 
-amp_context(goal: "add user authentication", scope: "project:amp", include_decisions: true)
   -> Returns: related symbols, past auth decisions, relevant files
 
 [Implement authentication]
@@ -182,7 +180,6 @@ Use when making significant technical choices.
 
 ```
 1. amp_query              -> Find related past decisions
-2. amp_context            -> Get context for decision area
 3. [Analyze and decide]
 4. amp_write_artifact     -> Record the ADR (type: "decision")
 5. amp_cache_write        -> Add to short-term memory
