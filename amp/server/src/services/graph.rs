@@ -32,6 +32,7 @@ pub struct TraversalResult {
     pub node_depths: Option<HashMap<String, usize>>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathNode {
     pub id: Uuid,

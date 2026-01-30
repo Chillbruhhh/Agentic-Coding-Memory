@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 use surrealdb::sql::Datetime;
 use uuid::Uuid;

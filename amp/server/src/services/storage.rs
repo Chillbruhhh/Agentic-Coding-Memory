@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::{database::Database, models::AmpObject};
 use anyhow::Result;
 use uuid::Uuid;

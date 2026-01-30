@@ -108,7 +108,7 @@ fn summarize_list_results(result: &serde_json::Value, input: &AmpListInput) -> R
                 .and_then(|t| t.as_str())
                 .unwrap_or("unknown");
             let id = obj.get("id").and_then(|i| i.as_str()).unwrap_or("unknown");
-            let short_id = &id[..8.min(id.len())];
+            let _short_id = &id[..8.min(id.len())];
 
             match obj_type {
                 "symbol" => {

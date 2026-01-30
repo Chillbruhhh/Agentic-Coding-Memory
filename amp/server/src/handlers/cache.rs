@@ -444,7 +444,7 @@ pub async fn block_compact(
         let seq = block.get("sequence").and_then(|v| v.as_u64()).unwrap_or(1) as usize;
 
         // Close the block
-        let summary_generated = close_block(&state, &id, &request.scope_id).await.is_ok();
+        let _summary_generated = close_block(&state, &id, &request.scope_id).await.is_ok();
 
         // Evict if needed
         let _ = evict_oldest_if_needed(&state, &request.scope_id).await;

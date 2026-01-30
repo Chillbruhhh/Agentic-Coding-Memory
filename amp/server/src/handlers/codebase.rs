@@ -17,6 +17,7 @@ use crate::{
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ParseCodebaseRequest {
     pub root_path: String,
     pub project_id: Option<String>,
@@ -24,6 +25,7 @@ pub struct ParseCodebaseRequest {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct ParseFileRequest {
     pub file_path: String,
     pub language: Option<String>,
@@ -86,6 +88,7 @@ pub struct FileContentResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct GetFileLogsQuery {
     pub project_id: Option<String>,
     pub language: Option<String>,
@@ -1783,7 +1786,7 @@ pub async fn sync_file(
             let values = take_json_values(&mut response, 0);
             if let Some(record) = values.first() {
                 existing_file_id = record.get("file_id").and_then(|v| v.as_str()).map(|s| s.to_string());
-                existing_file_path = record.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string());
+                let _ = record.get("file_path").and_then(|v| v.as_str()).map(|s| s.to_string());
                 if let Some(found_id) = existing_file_id.clone() {
                     file_id = found_id;
                 }

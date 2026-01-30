@@ -150,7 +150,7 @@ pub async fn register_connection(
 
     match result {
         Ok(Ok(response)) => {
-            let response = match response.check() {
+            let _response = match response.check() {
                 Ok(response) => response,
                 Err(_) => {
                     tracing::error!("Connection registration returned errors");

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::{
     models::AmpObject,
     surreal_json::{normalize_object_id, take_json_values},

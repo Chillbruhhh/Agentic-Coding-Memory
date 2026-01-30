@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use crate::models::Symbol;
 
 pub struct FileLogGenerator;
