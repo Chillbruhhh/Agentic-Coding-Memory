@@ -19,9 +19,36 @@ pub async fn handle_amp_status(client: &crate::amp_client::AmpClient) -> Result<
     let health = client.health().await?;
     let analytics = client.analytics().await?;
 
+    // Build a compact summary to avoid sending thousands of tokens
+    let mut latency_summary = serde_json::json!({});
+    if let Some(lat) = analytics.get("requestLatency") {
+        latency_summary = serde_json::json!({
+            "avg": lat.get("avg"),
+            "p50": lat.get("p50"),
+            "p95": lat.get("p95"),
+            "p99": lat.get("p99"),
+        });
+    }
+
+    // Only include top 5 object types by count
+    let objects_by_type = analytics.get("objectsByType").cloned().unwrap_or_default();
+
+    // Trim recent activity to 3 items
+    let recent_activity: Vec<serde_json::Value> = analytics
+        .get("recentActivity")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().take(3).cloned().collect())
+        .unwrap_or_default();
+
     let result = serde_json::json!({
         "health": health,
-        "analytics": analytics
+        "totalObjects": analytics.get("totalObjects"),
+        "totalRelationships": analytics.get("totalRelationships"),
+        "objectsByType": objects_by_type,
+        "systemMetrics": analytics.get("systemMetrics"),
+        "indexingStats": analytics.get("indexingStats"),
+        "latency": latency_summary,
+        "recentActivity": recent_activity,
     });
 
     Ok(vec![Content::text(serde_json::to_string_pretty(&result)?)])

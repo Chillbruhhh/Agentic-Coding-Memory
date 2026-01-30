@@ -199,15 +199,68 @@ Hybrid search combining text, vector, and graph retrieval.
 | `mode` | string | No | `hybrid` | `hybrid`, `text`, `vector`, `graph` |
 | `filters` | object | Yes | {} | Type filters |
 | `graph_options` | object | Yes | {} | Graph traversal options |
+| `graph_autoseed` | boolean | No | false | Use text/vector hits as graph seed nodes |
+| `graph_intersect` | boolean | No | false | Intersect graph results with text/vector |
 | `limit` | number | No | 5 | Max results |
 
+**Mode notes:**
+- `hybrid` — Full text + vector + graph (RRF fusion). Requires embedding service; may timeout on slow connections. Falls back to `text` if it fails.
+- `text` — Text search only. Fast, always works. Use as fallback.
+- `graph_autoseed: true` — Takes top text/vector hits and traverses their graph edges to pull in connected nodes. Produces richer results. Supports `graph_options` overrides (see below).
+
+**Autoseed with `graph_options` overrides:**
+
+When `graph_autoseed: true`, you can pass `graph_options` **without** `start_nodes` to customize the autoseed traversal. The seed nodes are still auto-generated from text/vector hits, but depth, relation types, and direction use your values instead of defaults.
+
+| `graph_options` field | Type | Default (autoseed) | Description |
+|---|---|---|---|
+| `max_depth` | number | `1` | How many hops from seed nodes. `1` = direct neighbors, `2` = neighbors of neighbors, etc. |
+| `relation_types` | array | all 5 types | Edge types to follow: `depends_on`, `calls`, `implements`, `modifies`, `defined_in` |
+| `direction` | string | `both` | Traversal direction: `outbound`, `inbound`, `both` |
+
+**Autoseed examples:**
+
+Default autoseed (depth 1, all relation types):
 ```json
 {
   "query": "authentication middleware",
   "mode": "hybrid",
-  "filters": {"type": "symbol"},
+  "filters": {},
   "graph_options": {},
+  "graph_autoseed": true,
   "limit": 10
+}
+```
+
+Deeper autoseed (depth 2 — pulls in neighbors of neighbors):
+```json
+{
+  "query": "authentication middleware",
+  "filters": {},
+  "graph_options": { "max_depth": 2 },
+  "graph_autoseed": true,
+  "limit": 10
+}
+```
+
+Scoped autoseed (only follow hierarchy and dependency edges):
+```json
+{
+  "query": "authentication middleware",
+  "filters": {},
+  "graph_options": { "max_depth": 2, "relation_types": ["defined_in", "depends_on"] },
+  "graph_autoseed": true,
+  "limit": 10
+}
+```
+
+Outbound-only autoseed (what does this code depend on?):
+```json
+{
+  "query": "cache service",
+  "filters": {},
+  "graph_options": { "direction": "outbound" },
+  "graph_autoseed": true
 }
 ```
 

@@ -93,11 +93,18 @@ impl HybridRetrievalService {
         );
 
         // Execute queries (allow autoseed to run graph after text/vector)
-        let hybrid_timeout = Duration::from_secs(5);
+        let hybrid_timeout = Duration::from_secs(15);
 
-        let (text_results, vector_results, mut graph_results) = if request.graph.is_none()
-            && request.graph_autoseed.unwrap_or(false)
-        {
+        // Autoseed mode: graph_autoseed=true, regardless of whether request.graph has overrides.
+        // When graph has start_nodes, that's explicit graph mode (no autoseed).
+        let use_autoseed = request.graph_autoseed.unwrap_or(false)
+            && !request
+                .graph
+                .as_ref()
+                .map(|g| !g.start_nodes.is_empty())
+                .unwrap_or(false);
+
+        let (text_results, vector_results, mut graph_results) = if use_autoseed {
             let query_results = timeout(hybrid_timeout, async {
                 tokio::try_join!(
                     self.execute_text_search(request),
@@ -119,7 +126,11 @@ impl HybridRetrievalService {
             };
 
             let mut seeded_request = request.clone();
-            let autoseed_query = self.build_autoseed_graph_query(&text_results, &vector_results);
+            let autoseed_query = self.build_autoseed_graph_query(
+                &text_results,
+                &vector_results,
+                request.graph.as_ref(),
+            );
             if autoseed_query.is_some() {
                 seeded_request.graph = autoseed_query;
             }
@@ -218,7 +229,7 @@ impl HybridRetrievalService {
         tracing::debug!("Executing text search: {}", query_str);
 
         let query_result = timeout(
-            Duration::from_secs(3),
+            Duration::from_secs(10),
             self.db.client.query(query_str.clone()),
         )
         .await;
@@ -309,7 +320,7 @@ impl HybridRetrievalService {
         );
 
         let query_result = timeout(
-            Duration::from_secs(3),
+            Duration::from_secs(10),
             self.db.client.query(query_str.clone()),
         )
         .await;
@@ -669,6 +680,7 @@ impl HybridRetrievalService {
         &self,
         text_results: &[(Value, f32, String)],
         vector_results: &[(Value, f32, String)],
+        overrides: Option<&GraphQuery>,
     ) -> Option<GraphQuery> {
         let mut ids: Vec<Uuid> = Vec::new();
         let mut seen = HashSet::new();
@@ -690,16 +702,26 @@ impl HybridRetrievalService {
             return None;
         }
 
+        // Use agent-provided overrides for depth/relation_types/direction,
+        // falling back to defaults when not specified.
         Some(GraphQuery {
             start_nodes: ids,
-            relation_types: Some(
-                DEFAULT_GRAPH_RELATIONS
-                    .iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            ),
-            max_depth: Some(DEFAULT_GRAPH_MAX_DEPTH),
-            direction: Some(crate::handlers::query::GraphDirection::Both),
+            relation_types: overrides
+                .and_then(|o| o.relation_types.clone())
+                .or_else(|| {
+                    Some(
+                        DEFAULT_GRAPH_RELATIONS
+                            .iter()
+                            .map(|s| s.to_string())
+                            .collect(),
+                    )
+                }),
+            max_depth: overrides
+                .and_then(|o| o.max_depth)
+                .or(Some(DEFAULT_GRAPH_MAX_DEPTH)),
+            direction: overrides
+                .and_then(|o| o.direction.clone())
+                .or(Some(crate::handlers::query::GraphDirection::Both)),
             algorithm: Some(TraversalAlgorithm::Collect),
             target_node: None,
         })

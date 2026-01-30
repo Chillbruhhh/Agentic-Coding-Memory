@@ -77,7 +77,7 @@ pub async fn handle_amp_query(
         }
     }
 
-    // Enable graph traversal only when we have start_nodes
+    // Enable graph traversal when we have start_nodes, or pass overrides for autoseed
     if let Some(graph_opts) = input.graph_options {
         if let Some(graph_obj) = graph_opts.as_object() {
             let has_start_nodes = graph_obj
@@ -89,7 +89,27 @@ pub async fn handle_amp_query(
                 anyhow::bail!("graph mode requires graph_options.start_nodes");
             }
             if has_start_nodes {
+                // Explicit graph mode: pass full graph options including start_nodes
                 query["graph"] = serde_json::Value::Object(graph_obj.clone());
+            } else if input.graph_autoseed.unwrap_or(false) {
+                // Autoseed override mode: pass depth/relation_types/direction as
+                // graph hints so the server uses them instead of hardcoded defaults.
+                // start_nodes will be auto-generated from text/vector hits.
+                let mut hints = serde_json::Map::new();
+                if let Some(depth) = graph_obj.get("max_depth") {
+                    hints.insert("max_depth".to_string(), depth.clone());
+                }
+                if let Some(types) = graph_obj.get("relation_types") {
+                    hints.insert("relation_types".to_string(), types.clone());
+                }
+                if let Some(dir) = graph_obj.get("direction") {
+                    hints.insert("direction".to_string(), dir.clone());
+                }
+                if !hints.is_empty() {
+                    // Empty start_nodes — server will autoseed these
+                    hints.insert("start_nodes".to_string(), serde_json::json!([]));
+                    query["graph"] = serde_json::Value::Object(hints);
+                }
             }
         }
     } else if mode == "graph" {

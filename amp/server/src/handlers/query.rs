@@ -33,7 +33,7 @@ pub struct QueryFilters {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct GraphQuery {
-    #[serde(deserialize_with = "deserialize_uuidish_vec")]
+    #[serde(default, deserialize_with = "deserialize_uuidish_vec")]
     pub start_nodes: Vec<Uuid>,
     pub relation_types: Option<Vec<String>>,
     pub max_depth: Option<usize>,

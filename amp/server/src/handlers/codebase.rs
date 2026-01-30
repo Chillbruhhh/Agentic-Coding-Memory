@@ -448,7 +448,7 @@ pub async fn get_file_log_object(
 
     // Tier 1: Try specific path matches first (exact, contains path/norm)
     // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
-    let specific_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm) ORDER BY updated_at DESC LIMIT 1";
+    let specific_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM (SELECT * FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm) ORDER BY updated_at DESC LIMIT 1)";
     let mut values = match state
         .db
         .client
@@ -467,7 +467,7 @@ pub async fn get_file_log_object(
     // Tier 2: If no specific match, try basename with ambiguity check
     // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
     if values.is_empty() {
-        let basename_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename ORDER BY updated_at DESC";
+        let basename_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM (SELECT * FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename ORDER BY updated_at DESC)";
 
         if let Ok(mut response) = state.db.client
             .query(basename_query)
