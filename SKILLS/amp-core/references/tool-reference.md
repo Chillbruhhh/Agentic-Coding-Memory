@@ -197,11 +197,52 @@ Hybrid search combining text, vector, and graph retrieval.
 |-----------|------|----------|---------|-------------|
 | `query` | string | Yes | - | Search query |
 | `mode` | string | No | `hybrid` | `hybrid`, `text`, `vector`, `graph` |
-| `filters` | object | Yes | {} | Type filters |
+| `filters` | object | Yes | {} | Type and kind filters (see below) |
 | `graph_options` | object | Yes | {} | Graph traversal options |
 | `graph_autoseed` | boolean | No | false | Use text/vector hits as graph seed nodes |
 | `graph_intersect` | boolean | No | false | Intersect graph results with text/vector |
 | `limit` | number | No | 5 | Max results |
+
+**`filters` object fields:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | array of strings | Object types to include: `["symbol"]`, `["decision"]`, `["changeset"]`, etc. |
+| `kind` | array of strings | Symbol kinds to include: `["project"]`, `["function"]`, `["file"]`, `["class"]`, etc. |
+| `project_id` | string | Filter to a specific project |
+| `tenant_id` | string | Filter to a specific tenant |
+
+**Important:** `type` and `kind` must be **arrays**, not strings.
+
+**Basic query (filter by type and kind):**
+```json
+{
+  "query": "authentication middleware",
+  "filters": {"type": ["symbol"], "kind": ["function"]},
+  "graph_options": {},
+  "limit": 10
+}
+```
+
+**Find all projects:**
+```json
+{
+  "query": "project",
+  "filters": {"type": ["symbol"], "kind": ["project"]},
+  "graph_options": {},
+  "limit": 20
+}
+```
+
+**Search decisions only:**
+```json
+{
+  "query": "caching strategy",
+  "filters": {"type": ["decision"]},
+  "graph_options": {},
+  "limit": 5
+}
+```
 
 **Mode notes:**
 - `hybrid` — Full text + vector + graph (RRF fusion). Requires embedding service; may timeout on slow connections. Falls back to `text` if it fails.
@@ -343,12 +384,35 @@ Manage session focus and outputs.
 
 ### `amp_file_content_get`
 
-Retrieve indexed file content from chunks.
+Retrieve indexed file content from memory chunks. Returns the file's content as stored in AMP's vector layer, without reading from disk.
+
+**When to use:** When you need file content that AMP has already indexed (e.g., to review code in memory without filesystem access, or to check what AMP "knows" about a file).
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `path` | string | Yes | File path |
-| `max_chars` | number | No | Limit content length |
+| `path` | string | Yes | File path (flexible matching — relative, absolute, or project-relative) |
+| `max_chars` | number | No | Limit content length (useful for large files) |
+
+```json
+{
+  "path": "src/services/cache.rs",
+  "max_chars": 5000
+}
+```
+
+**Output:**
+```json
+{
+  "path": "src/services/cache.rs",
+  "content": "use crate::database::Database;\nuse serde::Serialize;\n...",
+  "chunks": [
+    "use crate::database::Database; use serde::Serialize; ...",
+    "impl CacheService { pub async fn get_pack(...) { ... } }"
+  ]
+}
+```
+
+The `content` field contains the full reconstructed file content. The `chunks` array shows the individual indexed segments.
 
 ---
 

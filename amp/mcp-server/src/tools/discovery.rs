@@ -73,14 +73,8 @@ pub async fn handle_amp_list(
         object_type = Some("symbol".to_string());
     }
 
-    let query_limit = if symbol_kind.is_some() {
-        200
-    } else {
-        requested_limit
-    };
-
     let mut query = serde_json::json!({
-        "limit": query_limit  // Cap at 20 items
+        "limit": requested_limit
     });
 
     if let Some(obj_type) = &object_type {
@@ -95,6 +89,7 @@ pub async fn handle_amp_list(
         client.query(query).await?
     };
 
+    // Safety net: if server-side kind filter is unavailable, fall back to client-side
     if let Some(kind) = symbol_kind {
         if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
             let filtered = results
@@ -213,26 +208,15 @@ async fn query_symbols_by_kind(
     kind: &str,
     requested_limit: i32,
 ) -> Result<serde_json::Value> {
-    let scan_limit = 200.max(requested_limit as usize);
     let query = serde_json::json!({
-        "limit": scan_limit,
+        "limit": requested_limit,
         "filters": {
-            "type": ["symbol"]
+            "type": ["symbol"],
+            "kind": [kind]
         }
     });
 
-    let mut result = client.query(query).await?;
-    if let Some(results) = result.get("results").and_then(|r| r.as_array()) {
-        let filtered = results
-            .iter()
-            .filter(|item| matches_symbol_kind(item, kind))
-            .cloned()
-            .take(requested_limit as usize)
-            .collect::<Vec<_>>();
-        result["results"] = serde_json::Value::Array(filtered);
-    }
-
-    Ok(result)
+    client.query(query).await
 }
 
 fn matches_symbol_kind(item: &serde_json::Value, kind: &str) -> bool {
