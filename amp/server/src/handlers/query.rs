@@ -25,6 +25,7 @@ pub struct QueryRequest {
 pub struct QueryFilters {
     #[serde(rename = "type")]
     pub object_types: Option<Vec<String>>,
+    pub kind: Option<Vec<String>>,
     pub project_id: Option<String>,
     pub tenant_id: Option<String>,
     pub created_after: Option<chrono::DateTime<chrono::Utc>>,
@@ -425,6 +426,15 @@ fn build_query_string(request: &QueryRequest) -> String {
             conditions.push(format!("type IN [{}]", types_str));
         }
 
+        if let Some(kinds) = &filters.kind {
+            let kinds_str = kinds
+                .iter()
+                .map(|k| format!("'{}'", k.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("kind IN [{}]", kinds_str));
+        }
+
         if let Some(project_id) = &filters.project_id {
             conditions.push(format!("project_id = '{}'", project_id.replace("'", "\\'")));
         }
@@ -481,6 +491,15 @@ fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
                 .collect::<Vec<_>>()
                 .join(", ");
             conditions.push(format!("type IN [{}]", types_str));
+        }
+
+        if let Some(kinds) = &filters.kind {
+            let kinds_str = kinds
+                .iter()
+                .map(|k| format!("'{}'", k.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("kind IN [{}]", kinds_str));
         }
 
         if let Some(project_id) = &filters.project_id {
@@ -689,6 +708,15 @@ fn build_graph_query_string(
                 .collect::<Vec<_>>()
                 .join(", ");
             conditions.push(format!("type IN [{}]", types_str));
+        }
+
+        if let Some(kinds) = &filters.kind {
+            let kinds_str = kinds
+                .iter()
+                .map(|k| format!("'{}'", k.replace("'", "\\'")))
+                .collect::<Vec<_>>()
+                .join(", ");
+            conditions.push(format!("kind IN [{}]", kinds_str));
         }
 
         if let Some(project_id) = &filters.project_id {

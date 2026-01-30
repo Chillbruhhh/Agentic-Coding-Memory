@@ -37,8 +37,8 @@ This file describes when to use AMP tools and how they relate to memory layers.
   - Use when: You need context before modifying a file.
 
 - `amp_file_sync`
-  - Purpose: Update file log after changes.
-  - Use when: You changed behavior or structure in a file.
+  - Purpose: Sync file state across all 3 memory layers (temporal, vector, graph) after code changes.
+  - Use when: After ANY create, edit, or delete of a file. Sync SEQUENTIALLY (one at a time).
 
 - `amp_file_path_resolve`
   - Purpose: Resolve canonical path for ambiguous or relative file input.
@@ -60,10 +60,13 @@ This file describes when to use AMP tools and how they relate to memory layers.
   - Purpose: Hybrid search combining text, vector, and graph retrieval.
   - Use when: Searching for specific knowledge across all stored data.
   - Modes: `hybrid` (default), `text`, `vector`, `graph`
+  - Filters: `{"type": ["symbol"], "kind": ["function"]}` — both must be **arrays**.
+  - Key params: `query` (required), `filters` (required, use `{}` for no filter), `graph_options` (required, use `{}`), `limit`.
 
 - `amp_list`
   - Purpose: Browse stored objects by type.
   - Use when: Exploring what exists without a specific search query.
+  - Shortcut: `type: "project"` auto-maps to `symbol` + `kind: "project"`.
 
 - `amp_trace`
   - Purpose: Follow object relationships and provenance.
@@ -72,7 +75,9 @@ This file describes when to use AMP tools and how they relate to memory layers.
 ## Utility tools
 
 - `amp_file_content_get`
-  - Purpose: Retrieve indexed file content from memory chunks.
-  - Use when: You need file content without reading from disk.
+  - Purpose: Retrieve indexed file content from memory chunks without reading from disk.
+  - Use when: You need to review what AMP "knows" about a file, or access content without filesystem access.
+  - Key params: `path` (required), `max_chars` (optional — limits output for large files).
+  - Returns: `content` (full reconstructed text) and `chunks` (individual indexed segments).
 
 

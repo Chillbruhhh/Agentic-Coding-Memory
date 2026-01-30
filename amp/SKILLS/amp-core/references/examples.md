@@ -170,6 +170,83 @@ Found 10 objects:
 ...
 ```
 
+### amp_query - Hybrid search with filters
+
+```json
+{
+  "query": "error handling patterns",
+  "filters": {"type": ["symbol"]},
+  "graph_options": {},
+  "limit": 5
+}
+```
+
+**Output**:
+```
+Hybrid Query (RRF): error handling patterns
+
+Found 5 results (ranked by Reciprocal Rank Fusion):
+
+1. Symbol: handle_error (function) in src/handlers/error.rs
+   id: 8a3b2c1d-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   RRF Score: 0.0164
+
+2. Symbol: ErrorResponse (struct) in src/models/error.rs
+   id: 9d4e5f6a-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   RRF Score: 0.0161
+...
+```
+
+### amp_query - Filter by kind (e.g. find all projects)
+
+```json
+{
+  "query": "project",
+  "filters": {"type": ["symbol"], "kind": ["project"]},
+  "graph_options": {},
+  "limit": 20
+}
+```
+
+**Output**:
+```
+Hybrid Query (RRF): project
+
+Found 4 results (ranked by Reciprocal Rank Fusion):
+
+1. Symbol: amp (project) in /app/amp
+   id: 7de70d7c-e985-4158-bdf3-df16dac58f6e
+   RRF Score: 0.0164
+
+2. Symbol: myapp (project) in /home/user/myapp
+   id: 223e2103-6080-4f2e-aebb-a3020ba7a293
+   RRF Score: 0.0161
+...
+```
+
+**Important:** `filters.type` and `filters.kind` must be **arrays**, not strings.
+
+### amp_trace - Follow relationships
+
+```json
+{
+  "object_id": "8a3b2c1d-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
+  "depth": 2
+}
+```
+
+**Output**:
+```
+Trace for object: 8a3b2c1d-... (depth: 2)
+
+Found 6 relationships:
+
+1. 8a3b2c1d -> 9d4e5f6a (calls)
+2. 8a3b2c1d -> 1e2f3a4b (depends_on)
+3. 8a3b2c1d -> abc12345 (defined_in)
+...
+```
+
 ---
 
 ## Writing Tools
@@ -340,6 +417,20 @@ Artifact created: {
   "max_chars": 5000
 }
 ```
+
+**Output**:
+```json
+{
+  "path": "src/services/cache.rs",
+  "content": "use crate::database::Database;\nuse serde::Serialize;\n\npub struct CacheService { ... }\n\nimpl CacheService {\n    pub async fn get_pack(...) { ... }\n    pub async fn write_items(...) { ... }\n}",
+  "chunks": [
+    "use crate::database::Database; use serde::Serialize; pub struct CacheService { ... }",
+    "impl CacheService { pub async fn get_pack(...) { ... } pub async fn write_items(...) { ... } }"
+  ]
+}
+```
+
+The `content` field has the full reconstructed file. The `chunks` array shows the individual indexed segments. Use `max_chars` to limit output for large files.
 
 ### amp_file_path_resolve - Resolve ambiguous path
 

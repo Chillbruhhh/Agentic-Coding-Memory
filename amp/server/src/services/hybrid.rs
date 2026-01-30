@@ -738,6 +738,15 @@ impl HybridRetrievalService {
                 conditions.push(format!("type IN [{}]", types_str));
             }
 
+            if let Some(kinds) = &filters.kind {
+                let kinds_str = kinds
+                    .iter()
+                    .map(|k| format!("'{}'", k.replace("'", "\\'")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                conditions.push(format!("kind IN [{}]", kinds_str));
+            }
+
             if let Some(project_id) = &filters.project_id {
                 conditions.push(format!("project_id = '{}'", project_id.replace("'", "\\'")));
             }

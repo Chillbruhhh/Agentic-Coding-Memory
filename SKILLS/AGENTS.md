@@ -385,12 +385,20 @@ amp_status()
 # Browse recent decisions
 amp_list(type: "decision", limit: 10)
 
-# Search for authentication code
-amp_query(query: "JWT token validation", mode: "hybrid", limit: 5)
+# Search for authentication code (filters and graph_options are required, use {} for no filter)
+amp_query(query: "JWT token validation", filters: {"type": ["symbol"]}, graph_options: {}, limit: 5)
+
+# Search by kind (e.g., find all projects)
+amp_query(query: "project", filters: {"type": ["symbol"], "kind": ["project"]}, graph_options: {}, limit: 20)
+
+# Get indexed file content from memory (without reading disk)
+amp_file_content_get(path: "src/services/cache.rs", max_chars: 5000)
 
 # Trace relationships from a file
 amp_trace(object_id: "file-abc123", depth: 2)
 ```
+
+**Important:** `amp_query` `filters.type` and `filters.kind` must be **arrays**, not strings (e.g., `["symbol"]` not `"symbol"`).
 
 ### Focus Tracking
 
