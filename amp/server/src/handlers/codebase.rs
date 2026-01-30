@@ -444,7 +444,8 @@ pub async fn get_file_log_object(
     }
 
     // Tier 1: Try specific path matches first (exact, contains path/norm)
-    let specific_query = "SELECT id, type, file_path, file_id, summary, summary_markdown, purpose, key_symbols, dependencies, notes, updated_at, created_at, project_id, tenant_id FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm) ORDER BY updated_at DESC LIMIT 1";
+    // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
+    let specific_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm) ORDER BY updated_at DESC LIMIT 1";
     let mut values = match state
         .db
         .client
@@ -461,8 +462,9 @@ pub async fn get_file_log_object(
     };
 
     // Tier 2: If no specific match, try basename with ambiguity check
+    // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
     if values.is_empty() {
-        let basename_query = "SELECT id, type, file_path, file_id, summary, summary_markdown, purpose, key_symbols, dependencies, notes, updated_at, created_at, project_id, tenant_id FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename ORDER BY updated_at DESC";
+        let basename_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename ORDER BY updated_at DESC";
 
         if let Ok(mut response) = state.db.client
             .query(basename_query)
@@ -647,7 +649,43 @@ fn normalize_object_id(raw: &str) -> String {
         .to_string()
 }
 
-async fn find_file_node_id(state: &AppState, raw_path: &str, project_id: Option<&str>) -> Option<String> {
+async fn find_file_node_id(state: &AppState, raw_path: &str, project_id: Option<&str>, file_id: Option<&str>) -> Option<String> {
+    // Phase 1: Try file_id-based lookup first (most reliable)
+    if let Some(fid) = file_id {
+        // Use the same pattern as the working file_id lookups elsewhere
+        let file_id_query = "SELECT VALUE string::concat(id) FROM objects WHERE kind = 'file' AND file_id = $file_id LIMIT 1";
+        
+        match state.db.client
+            .query(file_id_query)
+            .bind(("file_id", fid.to_string()))
+            .await
+        {
+            Ok(mut response) => {
+                let values = take_json_values(&mut response, 0);
+                tracing::info!("find_file_node_id: file_id query for '{}' returned {} results", fid, values.len());
+                if let Some(id) = values
+                    .first()
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()) {
+                    // Extract UUID from "objects:⟨uuid⟩" format
+                    let clean_id = if let Some((_, raw_id)) = id.split_once(':') {
+                        raw_id.trim_matches('`').trim_matches('⟨').trim_matches('⟩').to_string()
+                    } else {
+                        id
+                    };
+                    tracing::info!("find_file_node_id: FOUND by file_id {} -> {}", fid, clean_id);
+                    return Some(clean_id);
+                } else {
+                    tracing::info!("find_file_node_id: file_id '{}' not found, will try path lookup", fid);
+                }
+            }
+            Err(e) => {
+                tracing::warn!("find_file_node_id: file_id query FAILED for '{}': {:?}", fid, e);
+            }
+        }
+    }
+    
+    // Phase 2: Fall back to path-based lookup
     let normalized = normalize_lookup_path(raw_path);
     let normalized_forward = normalized.replace('\\', "/");
     let raw_forward = raw_path.replace('\\', "/");
@@ -687,10 +725,18 @@ async fn find_file_node_id(state: &AppState, raw_path: &str, project_id: Option<
         Err(_) => return None,
     };
 
-    take_json_values(&mut response, 0)
+    let result = take_json_values(&mut response, 0)
         .first()
         .and_then(|v| v.as_str())
-        .map(normalize_object_id)
+        .map(normalize_object_id);
+    
+    if result.is_none() {
+        tracing::info!("find_file_node_id: returning NONE for path '{}'", raw_path);
+    } else {
+        tracing::info!("find_file_node_id: returning '{}' for path '{}'", result.as_ref().unwrap(), raw_path);
+    }
+    
+    result
 }
 
 async fn find_directory_node_id(state: &AppState, raw_path: &str) -> Option<String> {
@@ -1182,15 +1228,20 @@ async fn resolve_file_path(file_path: &str, state: &AppState) -> Result<PathBuf,
             return Ok(mapped);
         }
     }
+    let normalized_input = if cfg!(windows) {
+        file_path.to_string()
+    } else {
+        file_path.replace('\\', "/")
+    };
     // Strategy 1: Try as absolute path
-    let path = PathBuf::from(file_path);
+    let path = PathBuf::from(&normalized_input);
     if path.is_absolute() && path.exists() {
         return Ok(path);
     }
 
     // Strategy 2: Try relative to current working directory
     if let Ok(cwd) = std::env::current_dir() {
-        let path = cwd.join(file_path);
+        let path = cwd.join(&normalized_input);
         if path.exists() {
             return Ok(path);
         }
@@ -1198,7 +1249,7 @@ async fn resolve_file_path(file_path: &str, state: &AppState) -> Result<PathBuf,
 
     // Strategy 3: Try relative to project root if configured
     if let Ok(project_root) = std::env::var("PROJECT_ROOT") {
-        let path = PathBuf::from(project_root).join(file_path);
+        let path = PathBuf::from(project_root).join(&normalized_input);
         if path.exists() {
             return Ok(path);
         }
@@ -1209,7 +1260,7 @@ async fn resolve_file_path(file_path: &str, state: &AppState) -> Result<PathBuf,
             if root.as_os_str().is_empty() || root == PathBuf::from(".") {
                 continue;
             }
-            let candidate = root.join(file_path);
+            let candidate = root.join(&normalized_input);
             if candidate.exists() {
                 return Ok(candidate);
             }
@@ -1226,7 +1277,7 @@ async fn resolve_file_path(file_path: &str, state: &AppState) -> Result<PathBuf,
         let mut current = cwd.clone();
         for _ in 0..5 {
             // Try up to 5 levels up
-            let path = current.join(file_path);
+            let path = current.join(&normalized_input);
             if path.exists() {
                 return Ok(path);
             }
@@ -1766,7 +1817,8 @@ pub async fn sync_file(
         .to_string();
 
     // Normalize any existing records for this path to avoid duplicate codebases
-    let normalize_filelog_query = "UPDATE objects SET file_path = $path, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileLog' AND file_path CONTAINS $path";
+    // CRITICAL: Filter by project_id to prevent cross-project contamination
+    let normalize_filelog_query = "UPDATE objects SET file_path = $path, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileLog' AND file_path CONTAINS $path AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_filelog_query)
         .bind(("path", canonical_path.clone()))
@@ -1774,7 +1826,7 @@ pub async fn sync_file(
         .bind(("tenant_id", tenant_id.clone()))
         .await;
 
-    let normalize_chunk_query = "UPDATE objects SET file_path = $path, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileChunk' AND file_path CONTAINS $path";
+    let normalize_chunk_query = "UPDATE objects SET file_path = $path, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileChunk' AND file_path CONTAINS $path AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_chunk_query)
         .bind(("path", canonical_path.clone()))
@@ -1782,7 +1834,7 @@ pub async fn sync_file(
         .bind(("tenant_id", tenant_id.clone()))
         .await;
 
-    let normalize_symbol_query = "UPDATE objects SET path = $path, name = $name, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'Symbol' AND kind = 'file' AND path CONTAINS $path";
+    let normalize_symbol_query = "UPDATE objects SET path = $path, name = $name, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'Symbol' AND kind = 'file' AND path CONTAINS $path AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_symbol_query)
         .bind(("path", canonical_path.clone()))
@@ -1791,7 +1843,7 @@ pub async fn sync_file(
         .bind(("tenant_id", tenant_id.clone()))
         .await;
 
-    let normalize_filelog_ci = "UPDATE objects SET file_path = $path, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileLog' AND string::lowercase(file_path) CONTAINS string::lowercase($path)";
+    let normalize_filelog_ci = "UPDATE objects SET file_path = $path, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileLog' AND string::lowercase(file_path) CONTAINS string::lowercase($path) AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_filelog_ci)
         .bind(("path", canonical_path.clone()))
@@ -1799,7 +1851,7 @@ pub async fn sync_file(
         .bind(("tenant_id", tenant_id.clone()))
         .await;
 
-    let normalize_chunk_ci = "UPDATE objects SET file_path = $path, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileChunk' AND string::lowercase(file_path) CONTAINS string::lowercase($path)";
+    let normalize_chunk_ci = "UPDATE objects SET file_path = $path, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'FileChunk' AND string::lowercase(file_path) CONTAINS string::lowercase($path) AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_chunk_ci)
         .bind(("path", canonical_path.clone()))
@@ -1807,7 +1859,7 @@ pub async fn sync_file(
         .bind(("tenant_id", tenant_id.clone()))
         .await;
 
-    let normalize_symbol_ci = "UPDATE objects SET path = $path, name = $name, project_id = $project_id, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'Symbol' AND kind = 'file' AND string::lowercase(path) CONTAINS string::lowercase($path)";
+    let normalize_symbol_ci = "UPDATE objects SET path = $path, name = $name, tenant_id = $tenant_id, updated_at = time::now() WHERE type = 'Symbol' AND kind = 'file' AND string::lowercase(path) CONTAINS string::lowercase($path) AND project_id = $project_id";
     let _ = state.db.client
         .query(normalize_symbol_ci)
         .bind(("path", canonical_path.clone()))
@@ -1815,6 +1867,45 @@ pub async fn sync_file(
         .bind(("project_id", project_id.clone()))
         .bind(("tenant_id", tenant_id.clone()))
         .await;
+    // Remove duplicate file symbols for the same normalized path (keep most recent)
+    let dedupe_symbol_query = r#"
+        SELECT VALUE string::concat(id) FROM objects
+        WHERE kind = 'file'
+          AND (type = 'Symbol' OR type = 'symbol' OR type = 'file' OR type = 'File')
+          AND string::lowercase(path) = string::lowercase($path)
+          AND project_id = $project_id
+        ORDER BY updated_at DESC
+    "#;
+    if let Ok(mut response) = state.db.client
+        .query(dedupe_symbol_query)
+        .bind(("path", canonical_path.clone()))
+        .bind(("project_id", project_id.clone()))
+        .await
+    {
+        let ids = take_json_values(&mut response, 0);
+        if ids.len() > 1 {
+            let keep_id = ids[0].as_str().unwrap_or_default().to_string();
+            let delete_ids: Vec<String> = ids
+                .iter()
+                .skip(1)
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect();
+            if !delete_ids.is_empty() {
+                let delete_count = delete_ids.len();
+                let delete_query = "DELETE FROM objects WHERE id IN $ids";
+                let _ = state.db.client
+                    .query(delete_query)
+                    .bind(("ids", delete_ids))
+                    .await;
+                tracing::info!(
+                    "Deduped file symbols for {} (kept {}, removed {})",
+                    canonical_path,
+                    keep_id,
+                    delete_count
+                );
+            }
+        }
+    }
     // Remove duplicate FileLogs for the same path (keep current file_id)
     let dedupe_filelog_query = "DELETE FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $path AND file_id != $file_id";
     let _ = state.db.client
@@ -1942,7 +2033,7 @@ pub async fn sync_file(
     }
 
     // Ensure a Symbol node exists for the file so it appears in the graph UI
-    let symbol_id = find_file_node_id(&state, &canonical_path, Some(&project_id)).await;
+    let symbol_id = find_file_node_id(&state, &canonical_path, Some(&project_id), Some(&file_id)).await;
 
     if let Some(existing_id) = symbol_id {
         let update_symbol = r#"
@@ -1951,6 +2042,7 @@ pub async fn sync_file(
                 language = $lang,
                 project_id = $project_id,
                 tenant_id = $tenant_id,
+                file_id = $file_id,
                 updated_at = time::now()
             WHERE id = $id
         "#;
@@ -1961,6 +2053,7 @@ pub async fn sync_file(
             .bind(("lang", language.clone()))
             .bind(("project_id", project_id.clone()))
             .bind(("tenant_id", tenant_id.clone()))
+            .bind(("file_id", file_id.clone()))
             .await
             .is_ok()
         {
@@ -1971,13 +2064,14 @@ pub async fn sync_file(
         let create_symbol = r#"
             CREATE objects SET
                 id = type::thing('objects', $id),
-                type = 'file',
+                type = 'Symbol',
                 kind = 'file',
                 name = $name,
                 path = $path,
                 language = $lang,
                 project_id = $project_id,
                 tenant_id = $tenant_id,
+                file_id = $file_id,
                 created_at = time::now(),
                 updated_at = time::now()
         "#;
@@ -1990,6 +2084,7 @@ pub async fn sync_file(
             .bind(("lang", language.clone()))
             .bind(("project_id", project_id.clone()))
             .bind(("tenant_id", tenant_id.clone()))
+            .bind(("file_id", file_id.clone()))
             .await
             .is_ok()
         {

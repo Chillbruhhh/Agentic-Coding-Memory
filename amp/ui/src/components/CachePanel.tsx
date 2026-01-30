@@ -38,13 +38,6 @@ const normalizeItems = (items: any[]): CacheItem[] => items
     created_at: item.created_at,
   }));
 
-const kindIcons: Record<string, React.ReactNode> = {
-  fact: <HiLightBulb className="text-amber-400" size={14} />,
-  decision: <HiCheckCircle className="text-emerald-400" size={14} />,
-  snippet: <HiCode className="text-sky-400" size={14} />,
-  warning: <HiExclamation className="text-red-400" size={14} />,
-};
-
 const kindStyles: Record<string, string> = {
   fact: 'border-l-amber-500/50 bg-amber-950/20',
   decision: 'border-l-emerald-500/50 bg-emerald-950/20',
@@ -71,10 +64,12 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
 
     const scrollTop = scrollRef.current?.scrollTop ?? 0;
 
-    const sessionScopes = [`run:${runId}`, `session:${runId}`];
+    const normalizedRunId = runId.replace(/^objects:/, '').replace(/[`⟨⟩]/g, '');
+    const sessionScopes = [`run:${normalizedRunId}`, `session:${normalizedRunId}`];
+    const primarySessionScope = sessionScopes[0];
     const projectScope = projectId ? `project:${projectId}` : 'project:amp';
     const scopePatterns = scopeMode === 'session'
-      ? sessionScopes
+      ? [primarySessionScope]
       : scopeMode === 'project'
       ? [projectScope]
       : [...sessionScopes, projectScope];
@@ -127,7 +122,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     // If no blocks found via search, try to get the current open block
     if (foundBlocks.length === 0 && scopePatterns.length > 0) {
       try {
-        const currentScope = scopeMode === 'session' ? sessionScopes[0] : projectScope;
+        const currentScope = scopeMode === 'session' ? primarySessionScope : projectScope;
         const currentResponse = await fetch(`http://localhost:8105/v1/cache/block/current/${encodeURIComponent(currentScope)}`);
         if (currentResponse.ok) {
           const current = await currentResponse.json();
@@ -215,36 +210,6 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     });
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center p-4 text-slate-500 text-sm">
-        Loading cache...
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center p-4 text-red-400 text-sm">
-        {error}
-      </div>
-    );
-  }
-
-  if (blocks.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center p-4 text-slate-500 text-sm">
-        <span>No cache data for this session.</span>
-        <button
-          onClick={fetchCacheBlocks}
-          className="mt-2 flex items-center gap-1 text-xs text-primary hover:text-primary/80"
-        >
-          <HiRefresh size={12} /> Refresh
-        </button>
-      </div>
-    );
-  }
-
   // Flatten all items for display grouped by kind
   const allItems = blocks.flatMap(b => b.items);
   const itemsByKind = {
@@ -292,110 +257,135 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
         onMouseLeave={() => setIsInteracting(false)}
         onWheel={() => setIsInteracting(true)}
       >
-        {/* Warnings first if any */}
-        {itemsByKind.warning.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-red-400">
-              <HiExclamation size={12} />
-              Warnings ({itemsByKind.warning.length})
-            </div>
-            {itemsByKind.warning.map((item, idx) => (
-              <div
-                key={`warning-${idx}`}
-                className={`border-l-2 ${kindStyles.warning} rounded-r p-2`}
-              >
-                <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
-              </div>
-            ))}
+        {loading && (
+          <div className="flex items-center justify-center p-4 text-slate-500 text-sm">
+            Loading cache...
           </div>
         )}
-
-        {/* Decisions */}
-        {itemsByKind.decision.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
-              <HiCheckCircle size={12} />
-              Decisions ({itemsByKind.decision.length})
-            </div>
-            {itemsByKind.decision.map((item, idx) => (
-              <div
-                key={`decision-${idx}`}
-                className={`border-l-2 ${kindStyles.decision} rounded-r p-2`}
-              >
-                <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
-              </div>
-            ))}
+        {!loading && error && (
+          <div className="flex items-center justify-center p-4 text-red-400 text-sm">
+            {error}
           </div>
         )}
-
-        {/* Facts */}
-        {itemsByKind.fact.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
-              <HiLightBulb size={12} />
-              Facts ({itemsByKind.fact.length})
-            </div>
-            {itemsByKind.fact.map((item, idx) => (
-              <div
-                key={`fact-${idx}`}
-                className={`border-l-2 ${kindStyles.fact} rounded-r p-2`}
-              >
-                <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
-              </div>
-            ))}
+        {!loading && !error && blocks.length === 0 && (
+          <div className="flex flex-col items-center justify-center p-4 text-slate-500 text-sm">
+            <span>No cache data for this session.</span>
+            <button
+              onClick={fetchCacheBlocks}
+              className="mt-2 flex items-center gap-1 text-xs text-primary hover:text-primary/80"
+            >
+              <HiRefresh size={12} /> Refresh
+            </button>
           </div>
         )}
-
-        {/* Snippets */}
-        {itemsByKind.snippet.length > 0 && (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-xs font-medium text-sky-400">
-              <HiCode size={12} />
-              Snippets ({itemsByKind.snippet.length})
-            </div>
-            {itemsByKind.snippet.map((item, idx) => (
-              <div
-                key={`snippet-${idx}`}
-                className={`border-l-2 ${kindStyles.snippet} rounded-r p-2`}
-              >
-                {item.file_ref && (
-                  <div className="text-[10px] text-slate-500 mb-1 font-mono">{item.file_ref}</div>
-                )}
-                <pre className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-mono">
-                  {item.content}
-                </pre>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Block details (collapsible) */}
-        {blocks.length > 0 && blocks[0].id !== 'pack' && (
-          <div className="mt-4 pt-3 border-t border-border-dark">
-            <div className="text-xs text-slate-500 mb-2">Cache Blocks ({blocks.length})</div>
-            {blocks.map(block => (
-              <div key={block.id} className="mb-2">
-                <button
-                  onClick={() => toggleBlock(block.id)}
-                  className="w-full flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-white/5"
-                >
-                  {expandedBlocks.has(block.id) ? <HiChevronDown size={12} /> : <HiChevronRight size={12} />}
-                  <span className="font-mono">Block #{block.sequence}</span>
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${
-                    block.status === 'open' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'
-                  }`}>
-                    {block.status}
-                  </span>
-                  <span className="text-slate-500">{block.items.length} items</span>
-                </button>
-                {expandedBlocks.has(block.id) && block.summary && (
-                  <div className="ml-5 mt-1 text-xs text-slate-500 italic">
-                    {block.summary}
+        {!loading && !error && blocks.length > 0 && (
+          <>
+            {/* Warnings first if any */}
+            {itemsByKind.warning.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-red-400">
+                  <HiExclamation size={12} />
+                  Warnings ({itemsByKind.warning.length})
+                </div>
+                {itemsByKind.warning.map((item, idx) => (
+                  <div
+                    key={`warning-${idx}`}
+                    className={`border-l-2 ${kindStyles.warning} rounded-r p-2`}
+                  >
+                    <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
                   </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
+            )}
+
+            {/* Decisions */}
+            {itemsByKind.decision.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-emerald-400">
+                  <HiCheckCircle size={12} />
+                  Decisions ({itemsByKind.decision.length})
+                </div>
+                {itemsByKind.decision.map((item, idx) => (
+                  <div
+                    key={`decision-${idx}`}
+                    className={`border-l-2 ${kindStyles.decision} rounded-r p-2`}
+                  >
+                    <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Facts */}
+            {itemsByKind.fact.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-amber-400">
+                  <HiLightBulb size={12} />
+                  Facts ({itemsByKind.fact.length})
+                </div>
+                {itemsByKind.fact.map((item, idx) => (
+                  <div
+                    key={`fact-${idx}`}
+                    className={`border-l-2 ${kindStyles.fact} rounded-r p-2`}
+                  >
+                    <div className="text-xs text-slate-300 leading-relaxed">{item.content}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Snippets */}
+            {itemsByKind.snippet.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-sky-400">
+                  <HiCode size={12} />
+                  Snippets ({itemsByKind.snippet.length})
+                </div>
+                {itemsByKind.snippet.map((item, idx) => (
+                  <div
+                    key={`snippet-${idx}`}
+                    className={`border-l-2 ${kindStyles.snippet} rounded-r p-2`}
+                  >
+                    {item.file_ref && (
+                      <div className="text-[10px] text-slate-500 mb-1 font-mono">{item.file_ref}</div>
+                    )}
+                    <pre className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap font-mono">
+                      {item.content}
+                    </pre>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Block details (collapsible) */}
+            {blocks.length > 0 && blocks[0].id !== 'pack' && (
+              <div className="mt-4 pt-3 border-t border-border-dark">
+                <div className="text-xs text-slate-500 mb-2">Cache Blocks ({blocks.length})</div>
+                {blocks.map(block => (
+                  <div key={block.id} className="mb-2">
+                    <button
+                      onClick={() => toggleBlock(block.id)}
+                      className="w-full flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-white/5"
+                    >
+                      {expandedBlocks.has(block.id) ? <HiChevronDown size={12} /> : <HiChevronRight size={12} />}
+                      <span className="font-mono">Block #{block.sequence}</span>
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        block.status === 'open' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'
+                      }`}>
+                        {block.status}
+                      </span>
+                      <span className="text-slate-500">{block.items.length} items</span>
+                    </button>
+                    {expandedBlocks.has(block.id) && block.summary && (
+                      <div className="ml-5 mt-1 text-xs text-slate-500 italic">
+                        {block.summary}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

@@ -5696,3 +5696,4 @@ Match:     CLI-indexed project node ✓
 - Major Features: File sync graph attachment, ID normalization, container path mapping
 - Bug Fixes: Floating file nodes, missing project links, path mismatch issues
 - Status: All features complete and functional
+

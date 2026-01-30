@@ -64,7 +64,7 @@ Syncs file state across all three memory layers:
 
 ## Path Flexibility
 
-The tool uses flexible path matching:
+The tool uses **tiered path matching** with ambiguity detection:
 
 ```
 ✓ "src/auth/login.py"                    (relative)
@@ -74,11 +74,9 @@ The tool uses flexible path matching:
 ✓ "\\\\?\\C:\\Users\\...\\login.py"      (Windows extended)
 ```
 
-It tries to match existing indexed files by:
-1. Exact path match
-2. Path contains input
-3. Normalized path match (strips prefixes)
-4. Basename match (with ambiguity detection)
+**Matching tiers (in order):**
+1. **Tier 1 - Specific match**: Exact path, path contains input, normalized path
+2. **Tier 2 - Basename match**: Falls back to filename only (with ambiguity check)
 
 **Ambiguity detection:**
 If basename-only matching finds multiple files (e.g., `utils.py` exists in multiple directories), the tool returns a successful response with `status: "ambiguous"` listing all matching paths:
@@ -247,7 +245,92 @@ amp_file_sync({ ... })
 ## Best Practices
 
 1. **Sync after every edit** - Keep index current
-2. **Write descriptive summaries** - Help future agents
-3. **Include context** - What and why, not just what
-4. **Use run_id/agent_id** - Enables audit trail queries
-5. **Check before overwriting** - Use amp_filelog_get first
+2. **Sync files SEQUENTIALLY** - Never call multiple syncs in parallel (see below)
+3. **Write descriptive summaries** - Help future agents
+4. **Include context** - What and why, not just what
+5. **Use run_id/agent_id** - Enables audit trail queries
+6. **Check before overwriting** - Use amp_filelog_get first
+
+## CRITICAL: Sequential Syncing
+
+**NEVER call multiple `amp_file_sync` requests in parallel.** The server can timeout or fail when processing multiple sync operations simultaneously.
+
+Each sync operation:
+- Reads file content from disk
+- Parses and extracts symbols
+- Re-chunks content with embeddings
+- Updates graph relationships
+
+This is resource-intensive. Parallel requests overwhelm the server.
+
+**CORRECT - Sync files one at a time:**
+
+```
+# Modified 3 files - sync them sequentially
+amp_file_sync(path: "src/auth.py", action: "edit", summary: "Added login endpoint")
+# Wait for response...
+amp_file_sync(path: "src/middleware.py", action: "edit", summary: "Added auth middleware")
+# Wait for response...
+amp_file_sync(path: "src/routes.py", action: "edit", summary: "Registered auth routes")
+```
+
+**WRONG - Parallel syncing causes timeouts:**
+
+```
+# DO NOT DO THIS - calling all syncs in parallel
+# This will cause server timeouts and failures
+[parallel calls to amp_file_sync] ← WRONG
+```
+
+**Rule of thumb:** One sync, wait for response, next sync.
+
+## Fresh vs Existing Repositories
+
+`amp_file_sync` behaves differently depending on whether the codebase has been indexed:
+
+### Fresh Repository (New Project)
+
+When syncing files in a **brand-new codebase** that has never been indexed:
+
+1. **Use `action: "create"`** - This triggers project node auto-creation
+2. **Auto-creates project node** on first `amp_file_sync` call with `action: "create"`
+3. Detects project root via:
+   - `.git` directory (preferred)
+   - `.amp-root` marker file (fallback)
+4. Creates project FileLog for the repository
+5. New file nodes attach to directory and project nodes via `defined_in`
+
+**IMPORTANT:** You must use `action: "create"` (not "edit") to trigger the auto-creation. The "create" action is what initializes the project node.
+
+No manual indexing required - just start syncing files as you create them:
+
+### Existing Repository (Unindexed)
+
+When working with an **existing codebase** that hasn't been indexed:
+
+1. User must run `amp index` first
+2. Without indexing:
+   - `amp_file_sync` with action "edit" may fail
+   - `amp_query` returns empty results
+   - File context is missing
+
+**If you encounter empty results or errors on an existing codebase, instruct the user:**
+
+> "This repository hasn't been indexed yet. Please run `amp index` from your project root to initialize AMP memory for this codebase."
+
+### Running `amp index`
+
+**Prerequisites:**
+- AMP CLI must be installed (`cargo install amp-cli` or from releases)
+- Must be run from the **project root directory**
+
+```bash
+# Navigate to project root first
+cd /path/to/your/project
+
+# Run indexer
+amp index
+```
+
+The indexer scans the codebase and populates all three memory layers (temporal, vector, graph) with existing files, symbols, and relationships.
+

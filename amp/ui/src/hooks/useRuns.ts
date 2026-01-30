@@ -14,6 +14,24 @@ export interface RunSummary {
   status?: string;
   duration_ms?: number;
   confidence?: number;
+  // Optional properties that may be returned by API
+  focus?: {
+    title?: string;
+    plan?: string[];
+    status?: string;
+    started_at?: string;
+    completed_at?: string;
+  };
+  outputs?: Array<{
+    type?: string;
+    content?: string;
+    metadata?: any;
+  }>;
+  errors?: Array<{
+    message?: string;
+    code?: string;
+    context?: any;
+  }>;
 }
 
 export interface RunDetail extends RunSummary {

@@ -10,6 +10,7 @@ Documentation for the Agentic Memory Protocol (AMP).
 ## Core Concepts
 
 - [What is AMP?](concepts/what-is-amp.md) - Understanding the protocol, memory objects, and hybrid retrieval
+- [Hybrid Retrieval](concepts/hybrid-retrieval.md) - How vector, graph, and temporal search combine via RRF
 
 ## API Reference
 

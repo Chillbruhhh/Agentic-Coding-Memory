@@ -58,7 +58,7 @@ impl Drop for UiGuard {
     }
 }
 
-pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Result<()> {
+pub async fn run_index(path: &str, exclude: &[String], init_root: bool, client: &AmpClient) -> Result<()> {
     let use_tui = std::io::stdout().is_terminal();
     let cancel_flag = Arc::new(AtomicBool::new(false));
     if use_tui {
@@ -94,6 +94,10 @@ pub async fn run_index(path: &str, exclude: &[String], client: &AmpClient) -> Re
         .unwrap_or_else(|_| root_path_input.to_path_buf());
     if !root_path.exists() {
         anyhow::bail!("Directory does not exist: {}", path);
+    }
+
+    if init_root {
+        maybe_init_amp_root(&root_path)?;
     }
     
     // Create project root node first
@@ -655,6 +659,7 @@ fn is_text_file(path: &Path) -> bool {
     false
 }
 
+#[allow(dead_code)]
 async fn process_file(file_path: &Path, client: &AmpClient) -> Result<usize> {
     index_log!(" Processing file: {}", file_path.display());
     
@@ -789,6 +794,17 @@ async fn create_project_ai_log_and_link(
     Ok(())
 }
 
+fn maybe_init_amp_root(root_path: &Path) -> Result<()> {
+    let git_dir = root_path.join(".git");
+    let amp_root = root_path.join(".amp-root");
+    if amp_root.exists() || git_dir.exists() {
+        return Ok(());
+    }
+    std::fs::write(&amp_root, b"")?;
+    index_log!("Created .amp-root in {}", root_path.display());
+    Ok(())
+}
+
 
 async fn create_directory_node(dir_path: &Path, project_object_id: &str, project_id: &str, client: &AmpClient) -> Result<String> {
     let now = Utc::now();
@@ -858,6 +874,7 @@ async fn create_directory_ai_log_and_link(
 }
 
 
+#[allow(dead_code)]
 async fn process_file_hierarchical(
     file_path: &Path,
     project_object_id: &str,
@@ -1028,50 +1045,12 @@ async fn create_file_node(
     parent_dir_id: Option<&str>,
     client: &AmpClient,
 ) -> Result<String> {
-    let now = Utc::now();
+    let file_id = Uuid::new_v4().to_string();
+    let file_symbol = create_file_node_object(file_path, &file_id, project_id)?;
     let file_name = file_path.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
-    
-    let language = match file_path.extension().and_then(|e| e.to_str()) {
-        Some("py") => "python",
-        Some("ts") | Some("tsx") => "typescript",
-        Some("js") | Some("jsx") => "javascript",
-        _ => "unknown",
-    };
-    
-    let file_id = Uuid::new_v4().to_string();
-    let file_size = std::fs::metadata(file_path)
-        .map(|meta| meta.len())
-        .unwrap_or(0);
-    let line_count = std::fs::read_to_string(file_path)
-        .map(|content| content.lines().count() as u64)
-        .unwrap_or(0);
-    
-    let file_symbol = json!({
-        "id": file_id.clone(),
-        "type": "file",
-        "tenant_id": "default",
-        "project_id": project_id,
-        "created_at": now.to_rfc3339(),
-        "updated_at": now.to_rfc3339(),
-        "provenance": {
-            "source": "amp-cli-index",
-            "confidence": 0.9,
-            "method": "file-scan"
-        },
-        "links": [],
-        "name": file_name,
-        "kind": "file",
-        "path": file_path.to_string_lossy(),
-        "language": language,
-        "file_size": file_size,
-        "line_count": line_count,
-        "content_hash": format!("{:x}", md5::compute(file_name.as_bytes())),
-        "signature": format!("file: {}", file_name),
-        "documentation": format!("File: {}", file_path.display())
-    });
-    
+
     client.create_object(file_symbol).await?;
     
     // Small delay to ensure object is fully created
@@ -1149,6 +1128,7 @@ fn create_amp_symbol_from_parsed_hierarchical(symbol_data: &serde_json::Value, f
     Ok(symbol)
 }
 
+#[allow(dead_code)]
 async fn create_simple_file_symbol(file_path: &Path, project_id: &str, client: &AmpClient) -> Result<usize> {
     // Read file content
     let content = match std::fs::read_to_string(file_path) {
@@ -1244,6 +1224,7 @@ mod tests {
 }
 
 
+#[allow(dead_code)]
 async fn create_file_chunks(file_path: &Path, file_id: &str, project_id: &str, client: &AmpClient) -> Result<usize> {
     let content = std::fs::read_to_string(file_path)?;
     let language = match file_path.extension().and_then(|e| e.to_str()) {
@@ -1317,6 +1298,7 @@ fn create_chunk_object(file_path: &Path, file_id: &str, project_id: &str, conten
     })
 }
 
+#[allow(dead_code)]
 async fn create_file_log(file_path: &Path, file_id: &str, project_id: &str, symbols: &[serde_json::Value], client: &AmpClient) -> Result<()> {
     let language = match file_path.extension().and_then(|e| e.to_str()) {
         Some("py") => "python",

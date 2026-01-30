@@ -490,7 +490,8 @@ pub async fn write_artifact(
 
         // Try file nodes first so graph links attach to file nodes.
         // Use string::concat(id) to convert SurrealDB Thing to JSON-serializable string.
-        let symbol_query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE ((type = 'file') OR (type = 'symbol' AND kind = 'file')) AND ((path = $path OR path CONTAINS $path OR path CONTAINS $norm OR path CONTAINS $basename) OR (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename)) LIMIT 1";
+        // Match both 'file' (legacy) and 'Symbol' (new standard) types for backward compatibility
+        let symbol_query = "SELECT VALUE { id: string::concat(id), file_id: file_id } FROM objects WHERE (kind = 'file' AND (type = 'Symbol' OR type = 'symbol' OR type = 'file' OR type = 'File')) AND ((path = $path OR path CONTAINS $path OR path CONTAINS $norm OR path CONTAINS $basename) OR (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename)) LIMIT 1";
         if let Ok(Ok(mut response)) = timeout(
             Duration::from_secs(2),
             state.db.client

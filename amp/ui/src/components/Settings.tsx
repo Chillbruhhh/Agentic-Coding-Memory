@@ -75,6 +75,8 @@ export const Settings: React.FC = () => {
   const [showOpenAiKey, setShowOpenAiKey] = useState(false);
   const [showOpenRouterKey, setShowOpenRouterKey] = useState(false);
   const [modelTab, setModelTab] = useState<'index' | 'embeddings'>('index');
+  const [showNuclearModal, setShowNuclearModal] = useState(false);
+  const [isNuclearDeleting, setIsNuclearDeleting] = useState(false);
 
   useEffect(() => {
     loadSettings();
@@ -601,6 +603,93 @@ export const Settings: React.FC = () => {
           <p className="text-xs text-stone-500 mt-1 font-mono">Legacy setting for maximum embedding dimension</p>
         </div>
       </div>
+
+      {/* Danger Zone - Nuclear Delete */}
+      <div className="bg-gradient-to-br from-[#1c1917] to-[#0c0a09] border border-red-500/30 p-6 shadow-lg">
+        <h3 className="text-lg font-display font-semibold flex items-center gap-2 text-red-400 mb-4">
+          <HiExclamation className="text-red-500" />
+          Danger Zone
+        </h3>
+        <p className="text-sm text-slate-400 mb-4">
+          This action will permanently delete ALL data from AMP including objects, relationships, and graph edges. This cannot be undone.
+        </p>
+        <button
+          onClick={() => setShowNuclearModal(true)}
+          disabled={loading}
+          className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+        >
+          Remove All Data
+        </button>
+      </div>
+
+      {/* Nuclear Delete Confirmation Modal */}
+      {showNuclearModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-panel-dark border border-red-500/50 rounded-lg w-full max-w-md p-6">
+            <div className="flex items-start gap-4 mb-4">
+              <div className="p-3 bg-red-500/20 rounded-lg">
+                <HiExclamation className="text-red-400" size={24} />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-slate-200 mb-2">Nuclear Delete?</h3>
+                <p className="text-sm text-slate-400 mb-1">
+                  Are you sure you want to delete <span className="text-red-400 font-medium">ALL DATA</span> from AMP?
+                </p>
+                <p className="text-sm text-red-400">
+                  This will permanently delete all objects, relationships, graph edges, and cache entries. This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 justify-end">
+              <button
+                onClick={() => setShowNuclearModal(false)}
+                disabled={isNuclearDeleting}
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-slate-200 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  setIsNuclearDeleting(true);
+                  try {
+                    const response = await fetch('http://localhost:8105/v1/settings/nuclear-delete', {
+                      method: 'POST',
+                    });
+                    
+                    if (!response.ok) {
+                      throw new Error('Nuclear delete failed');
+                    }
+                    
+                    const result = await response.json();
+                    console.log('Nuclear delete completed:', result);
+                    
+                    setShowNuclearModal(false);
+                    setSuccess(true);
+                    setTimeout(() => setSuccess(false), 5000);
+                  } catch (err) {
+                    console.error('Error during nuclear delete:', err);
+                    setError(err instanceof Error ? err.message : 'Nuclear delete failed');
+                  } finally {
+                    setIsNuclearDeleting(false);
+                  }
+                }}
+                disabled={isNuclearDeleting}
+                className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isNuclearDeleting ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin inline-block mr-2" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete All Data'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

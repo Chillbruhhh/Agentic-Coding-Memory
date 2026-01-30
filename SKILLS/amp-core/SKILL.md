@@ -71,6 +71,13 @@ These rituals are **MANDATORY** for proper memory continuity.
 
 Execute at the start of every new session:
 
+**Option 1: List all recent blocks (recommended, token-efficient)**
+```
+amp_cache_read(scope_id: "project:{id}", list_all: true)
+```
+Returns the 5 newest blocks with summaries (~200 tokens each). Use `include_content: true` to fetch full block content.
+
+**Option 2: Search by query**
 ```
 amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)
 ```

@@ -1,0 +1,55 @@
+{
+  "name": "@chillbruhhh/amp-cli",
+  "version": "0.1.1",
+  "description": "AMP (Agentic Memory Protocol) CLI - Terminal interface for AI agent memory management",
+  "bin": {
+    "amp": "bin/amp.js"
+  },
+  "scripts": {
+    "postinstall": "node install.js",
+    "preuninstall": "node uninstall.js"
+  },
+  "keywords": [
+    "amp",
+    "agentic",
+    "memory",
+    "protocol",
+    "ai",
+    "agent",
+    "cli",
+    "mcp"
+  ],
+  "author": "AMP Protocol Team",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Chillbruhhh/Agentic-Coding-Memory.git",
+    "directory": "amp/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/Chillbruhhh/Agentic-Coding-Memory/issues"
+  },
+  "homepage": "https://github.com/Chillbruhhh/Agentic-Coding-Memory#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "install.js",
+    "uninstall.js",
+    "README.md",
+    "Cargo.toml",
+    "Cargo.lock",
+    "src/",
+    "assets/"
+  ]
+}

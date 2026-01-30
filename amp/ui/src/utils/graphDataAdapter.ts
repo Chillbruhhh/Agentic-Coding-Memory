@@ -28,8 +28,8 @@ export interface GraphNode {
 }
 
 export interface GraphLink {
-  source: string;
-  target: string;
+  source: string | { id: string; [key: string]: any };
+  target: string | { id: string; [key: string]: any };
   type: string;
   value: number;
 }
@@ -132,38 +132,44 @@ export const transformAmpToGraph = (
       color: getNodeColor((obj.kind || obj.type) as string)
     }));
 
+  const nodeById = new Map(nodes.map(node => [node.id, node]));
+  const fileHasDirParent = new Set<string>();
+  relationships.forEach(rel => {
+    const relType = (rel.relation_type || '').toLowerCase();
+    if (relType !== 'defined_in') return;
+    const sourceId = rel.in;
+    const targetId = rel.out;
+    const source = nodeById.get(sourceId);
+    const target = nodeById.get(targetId);
+    if (!source || !target) return;
+    const sourceKind = (source.kind || '').toLowerCase();
+    const targetKind = (target.kind || '').toLowerCase();
+    if (sourceKind === 'directory' && targetKind === 'file') {
+      fileHasDirParent.add(target.id);
+    } else if (sourceKind === 'file' && targetKind === 'directory') {
+      fileHasDirParent.add(source.id);
+    }
+  });
+
   const links: GraphLink[] = relationships
     .filter(rel => {
-      // Only include links between existing nodes
-      const sourceExists = nodes.some(n => n.id === rel.in);
-      const targetExists = nodes.some(n => n.id === rel.out);
-      
-      // Debug: check what the missing source/target objects are
-      if (!sourceExists) {
-        const sourceObj = objects.find(obj => normalizeId(obj.id) === rel.in);
-        console.log('Missing source object:', sourceObj?.kind, sourceObj?.type, sourceObj?.name);
-      }
-      if (!targetExists) {
-        const targetObj = objects.find(obj => normalizeId(obj.id) === rel.out);
-        console.log('Missing target object:', targetObj?.kind, targetObj?.type, targetObj?.name);
-      }
-      
-      if (!sourceExists || !targetExists) return false;
-
-      const sourceNode = nodes.find(n => n.id === rel.in);
-      const targetNode = nodes.find(n => n.id === rel.out);
+      // Only include links between existing nodes (use Map for O(1) lookup)
+      const sourceNode = nodeById.get(rel.in);
+      const targetNode = nodeById.get(rel.out);
       if (!sourceNode || !targetNode) return false;
 
+      const relType = (rel.relation_type || '').toLowerCase();
       const sourceKind = (sourceNode.kind || '').toLowerCase();
       const targetKind = (targetNode.kind || '').toLowerCase();
-      const relType = (rel.relation_type || '').toLowerCase();
 
-      // Hide project <-> file links to keep hierarchy clean.
       if (relType === 'defined_in') {
         const isProjectFile =
           (sourceKind === 'project' && targetKind === 'file') ||
           (sourceKind === 'file' && targetKind === 'project');
-        if (isProjectFile) return false;
+        if (isProjectFile) {
+          const fileId = sourceKind === 'file' ? sourceNode.id : targetNode.id;
+          if (fileHasDirParent.has(fileId)) return false;
+        }
       }
 
       return true;
@@ -174,24 +180,6 @@ export const transformAmpToGraph = (
       type: rel.relation_type || 'defined_in',
       value: 1
     }));
-
-  console.log(`Created ${links.length} links from ${relationships.length} relationships`);
-  console.log('Sample nodes:', nodes.slice(0, 3).map(n => ({ id: n.id, name: n.name })));
-  console.log('Sample relationships:', relationships.slice(0, 3));
-  console.log('Sample links:', links.slice(0, 3));
-  console.log('Node ID format:', nodes[0]?.id);
-  console.log('Link source format:', links[0]?.source);
-
-  // Force add a test link if we have nodes but no links
-  if (nodes.length >= 2 && links.length === 0) {
-    console.log('Adding test link between first two nodes');
-    links.push({
-      source: nodes[0].id,
-      target: nodes[1].id,
-      type: 'test',
-      value: 1
-    });
-  }
 
   return { nodes, links };
 };

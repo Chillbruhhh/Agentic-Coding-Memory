@@ -45,22 +45,42 @@ Close current block and open a new one. Call on conversation compact.
 
 ### `amp_cache_read`
 
-Unified cache read - search blocks, get specific block, or get current block.
+Unified cache read - list all blocks, search blocks, get specific block, or get current block.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | `scope_id` | string | Yes | - | Scope identifier |
+| `list_all` | boolean | No | false | List all blocks (newest first) |
 | `query` | string | No | - | Search closed blocks by summary |
-| `limit` | number | No | 5 | Max blocks when searching |
-| `include_content` | boolean | No | false | Return full content with search |
-| `include_open` | boolean | No | false | Include current open block in search |
+| `limit` | number | No | 5 | Max blocks when listing or searching |
+| `include_content` | boolean | No | false | Return full content instead of summaries |
+| `include_open` | boolean | No | false* | Include current open block in results |
 | `block_id` | string | No | - | Get specific block by ID |
 
-**Mode selection:**
-- `query` only → search, return summaries
-- `query` + `include_content: true` → search, return full content
-- `block_id` → get specific block
-- neither → get current open block
+*Note: `include_open` defaults to `true` when `list_all=true` (since open block is current work).
+
+**Mode selection (checked in order):**
+1. `block_id` → get specific block (full content)
+2. `list_all: true` → list newest blocks (summaries, includes open block)
+3. `query` → search by summary (filtered results)
+4. neither → get current open block only
+
+**List all blocks (summaries - recommended for session start):**
+```json
+{
+  "scope_id": "project:amp",
+  "list_all": true
+}
+```
+
+**List all blocks (with full content):**
+```json
+{
+  "scope_id": "project:amp",
+  "list_all": true,
+  "include_content": true
+}
+```
 
 **Search (summaries):**
 ```json

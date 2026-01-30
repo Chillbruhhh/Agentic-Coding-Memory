@@ -14,7 +14,7 @@ BEFORE doing ANYTHING else, when starting ANY session:
 
 **MANDATORY ritual on EVERY session:**
 
-1. **Restore Context** → `amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)`
+1. **Restore Context** → `amp_cache_read(scope_id: "project:{id}", list_all: true)` (or use `query: "..."` for targeted search)
 2. **Set Focus** → `amp_focus(action: "set", title: "...", plan: [...])` BEFORE starting any task
 3. **Do Work** → Implement with memory context restored
 4. **Cache Every Turn** → `amp_cache_write(...)` for facts/decisions/warnings learned
@@ -62,6 +62,13 @@ amp_cache_write(scope_id: "project:{id}", kind: "warning", content: "DB connecti
 
 ### On Session Start (ALWAYS - NO EXCEPTIONS)
 
+**Recommended: List all recent blocks (token-efficient)**
+```
+amp_cache_read(scope_id: "project:{id}", list_all: true)
+```
+Returns the 5 newest blocks with summaries (~1000 tokens total). Add `include_content: true` for full content.
+
+**Alternative: Search by query**
 ```
 amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)
 ```
@@ -74,7 +81,7 @@ When conversation is compacted/summarized, execute BOTH in order:
 
 ```
 amp_cache_compact(scope_id: "project:{id}")
-amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)
+amp_cache_read(scope_id: "project:{id}", list_all: true, include_content: true)
 ```
 
 FAILURE to do this = PERMANENT LOSS of insights from compacted conversation.
@@ -167,7 +174,7 @@ If you try to use AMP tools and get empty results or errors on an existing codeb
 
 ```
 # 1. ALWAYS restore context first
-amp_cache_read(scope_id: "project:myapp", query: "recent work", include_content: true)
+amp_cache_read(scope_id: "project:myapp", list_all: true, include_content: true)
 
 # 2. Check what's been done
 amp_list(type: "changeset", limit: 5)
@@ -297,17 +304,19 @@ amp_write_artifact(
 )
 ```
 
-**Changeset** - Completed work (REQUIRED after completing features):
+**Changeset** - Completed work (RARE - only when WHY matters):
 ```
 amp_write_artifact(
   type: "changeset",
   title: "Implement authentication middleware",
-  description: "JWT validation with refresh token rotation",
+  description: "JWT validation with refresh token rotation. Chose JWT over sessions because we need stateless auth for horizontal scaling. Refresh rotation prevents token theft.",
   files_changed: ["src/middleware/auth.rs", "src/handlers/login.rs"],
   diff_summary: "+200 lines. New AuthMiddleware, token refresh endpoint.",
   linked_decisions: ["decision-uuid-for-jwt-choice"]
 )
 ```
+
+**IMPORTANT:** Changesets are the LEAST common artifact type. Don't use them as changelogs - git already tracks what files changed. Only create a changeset when the "WHY" behind the change is valuable and non-obvious. Most of the time, use a "note" artifact to capture the insight instead.
 
 **Note** - Insights and warnings (REQUIRED for non-obvious discoveries):
 ```
@@ -469,16 +478,18 @@ agent:{id}    - Private to one agent (rare)
 4. **After compaction** → ALWAYS `amp_cache_compact` then `amp_cache_read`
 5. **After code changes** → ALWAYS `amp_file_sync` (SEQUENTIALLY, not parallel)
 6. **Multiple file syncs** → Sync ONE file at a time to avoid server timeouts
-7. **Significant decisions** → ALWAYS create decision artifact
-8. **Completed features** → ALWAYS create changeset artifact
-9. **Task complete** → ALWAYS `amp_focus(action: "complete")` with summary
-10. **Gotchas discovered** → Cache as warning AND create note artifact if severe
-11. **Unindexed repo** → Tell user to run `amp index` first
-12. **NEVER** start implementing without setting focus
-13. **NEVER** call multiple `amp_file_sync` in parallel
-14. **NEVER** end a turn without considering what to cache
-15. **NEVER** skip rituals to save time
-16. **NEVER** guess parameters - check `SKILLS/amp-core/references/tool-reference.md`
+7. **Significant decisions** → Create decision artifact with alternatives and rationale
+8. **Insights and discoveries** → Create note artifact (most common type)
+9. **Changesets** → RARE - only when WHY adds value beyond git diff (not a changelog!)
+10. **Task complete** → ALWAYS `amp_focus(action: "complete")` with summary
+11. **Gotchas discovered** → Cache as warning AND create note artifact if severe
+12. **Unindexed repo** → Tell user to run `amp index` first
+13. **NEVER** start implementing without setting focus
+14. **NEVER** call multiple `amp_file_sync` in parallel
+15. **NEVER** end a turn without considering what to cache
+16. **NEVER** skip rituals to save time
+17. **NEVER** guess parameters - check `SKILLS/amp-core/references/tool-reference.md`
+18. **NEVER** create changeset artifacts just to list which files changed (that's what git is for)
 
 ## Skill Documentation
 

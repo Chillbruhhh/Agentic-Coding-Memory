@@ -84,6 +84,8 @@ Content-Type: application/json
 | POST | `/v1/query` | Hybrid search (vector + graph + temporal) |
 | GET | `/v1/trace/{id}` | Object provenance and relationships |
 
+> **Note:** Hybrid queries use [Reciprocal Rank Fusion (RRF)](../concepts/hybrid-retrieval.md) to combine results from vector search, graph traversal, and temporal filtering into a unified ranking.
+
 ### Relationships
 
 | Method | Endpoint | Description |

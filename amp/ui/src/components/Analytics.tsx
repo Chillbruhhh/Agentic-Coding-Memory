@@ -4,7 +4,7 @@ import { HiTrendingUp, HiExclamation } from 'react-icons/hi';
 import { BiLineChart } from 'react-icons/bi';
 
 export const Analytics: React.FC = () => {
-  const { analytics, loading, error, timeInterval, setTimeInterval } = useAnalytics();
+  const { analytics, loading, error } = useAnalytics();
   
   // Process latency data: 1 point per second, fixed 60-second window
   const processLatencyData = () => {

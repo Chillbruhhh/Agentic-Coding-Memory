@@ -104,14 +104,24 @@ impl ChunkingService {
             .map(|t| t.len() + 1)
             .sum::<usize>();
 
-        let start_line = content[..start_pos.min(content.len())]
+        let start_pos = clamp_char_boundary(content, start_pos.min(content.len()));
+        let end_pos = clamp_char_boundary(content, end_pos.min(content.len()));
+
+        let start_line = content[..start_pos]
             .lines()
             .count()
             .max(1) as u32;
-        let end_line = content[..end_pos.min(content.len())].lines().count().max(1) as u32;
+        let end_line = content[..end_pos].lines().count().max(1) as u32;
 
         (start_line, end_line)
     }
+}
+
+fn clamp_char_boundary(content: &str, mut idx: usize) -> usize {
+    while idx > 0 && !content.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
 }
 
 impl Default for ChunkingService {

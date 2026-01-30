@@ -38,6 +38,7 @@ GIT_ADD_INSTRUCTIONS.md
 .venv
 venv
 
+amp/logs/
 
 # Collected texts
 collected-texts/

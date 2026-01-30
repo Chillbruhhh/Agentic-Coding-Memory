@@ -36,6 +36,9 @@ enum Commands {
         /// Skip files matching these patterns
         #[arg(long, value_delimiter = ',')]
         exclude: Vec<String>,
+        /// Create a .amp-root marker in the target directory if missing
+        #[arg(long, default_value_t = false)]
+        init_root: bool,
     },
     /// Clear all objects from the AMP database
     Clear {
@@ -79,11 +82,11 @@ async fn main() -> Result<()> {
         Commands::History => {
             commands::history::show_history(&client).await?;
         }
-        Commands::Index { path, exclude } => {
+        Commands::Index { path, exclude, init_root } => {
             if should_run_index_in_container(&path)? {
-                run_index_in_container(&path, &exclude)?;
+                run_index_in_container(&path, &exclude, init_root)?;
             } else {
-                commands::index::run_index(&path, &exclude, &client).await?;
+                commands::index::run_index(&path, &exclude, init_root, &client).await?;
             }
         }
         Commands::Query { text, relationships } => {
@@ -140,7 +143,7 @@ fn should_run_index_in_container(path: &str) -> Result<bool> {
     Ok(false)
 }
 
-fn run_index_in_container(path: &str, exclude: &[String]) -> Result<()> {
+fn run_index_in_container(path: &str, exclude: &[String], init_root: bool) -> Result<()> {
     let compose_file = find_compose_file(&env::current_dir()?)
         .ok_or_else(|| anyhow::anyhow!("docker-compose.yml not found"))?;
     let compose_root = compose_file
@@ -177,6 +180,9 @@ fn run_index_in_container(path: &str, exclude: &[String]) -> Result<()> {
 
     if !exclude.is_empty() {
         cmd.arg("--exclude").arg(exclude.join(","));
+    }
+    if init_root {
+        cmd.arg("--init-root");
     }
 
     let status = cmd.status()?;

@@ -18,6 +18,8 @@ pub struct RelationshipQuery {
     pub target_id: Option<String>,
     #[serde(rename = "type")]
     pub relation_type: Option<String>,
+    /// Filter relationships by project_id (matches edges where either endpoint belongs to this project)
+    pub project_id: Option<String>,
 }
 
 pub async fn create_relationship(
@@ -41,21 +43,27 @@ pub async fn create_relationship(
     // Verify both objects exist first - use simple SELECT instead of type::record
     // Skip verification - SurrealDB enum serialization issues prevent proper verification
     tracing::info!(
-        "Creating relationship: {} -> {} -> {}",
+        "Creating relationship: {} -> {} -> {} (project: {:?})",
         request.source_id,
         table_name,
-        request.target_id
+        request.target_id,
+        request.project_id
     );
 
-    // Use RELATE statement for graph edges - use hyphenated UUID format
+    // Use RELATE statement for graph edges - include project_id for isolation
+    let project_id = request.project_id.clone().unwrap_or_default();
     let query = format!(
-        "RELATE objects:`{}`->{}->objects:`{}` SET created_at = time::now()",
+        "RELATE objects:`{}`->{}->objects:`{}` SET created_at = time::now(), project_id = $project_id",
         request.source_id, table_name, request.target_id
     );
 
     tracing::debug!("Creating relationship: {}", query);
 
-    let result = timeout(Duration::from_secs(5), state.db.client.query(query)).await;
+    let result = timeout(
+        Duration::from_secs(5),
+        state.db.client.query(&query).bind(("project_id", project_id)),
+    )
+    .await;
 
     match result {
         Ok(Ok(_response)) => {
@@ -93,11 +101,12 @@ pub async fn get_relationships(
     Query(query): Query<RelationshipQuery>,
 ) -> Result<Json<Vec<Value>>, StatusCode> {
     tracing::debug!(
-        "Relationship query params: object_id={:?}, source_id={:?}, target_id={:?}, type={:?}",
+        "Relationship query params: object_id={:?}, source_id={:?}, target_id={:?}, type={:?}, project_id={:?}",
         query.object_id,
         query.source_id,
         query.target_id,
-        query.relation_type
+        query.relation_type,
+        query.project_id
     );
     // Build query based on filters - use SELECT VALUE to avoid enum serialization issues
     // Note: in/out ARE the record IDs directly (e.g., objects:uuid), not objects with .id property
@@ -126,6 +135,11 @@ pub async fn get_relationships(
     if query.target_id.is_some() {
         conditions.push("in = type::thing('objects', $target)".to_string());
     }
+    // Filter by project_id - uses the edge's own project_id field
+    // (project_id is now stored on edges during creation)
+    if query.project_id.is_some() {
+        conditions.push("project_id = $project".to_string());
+    }
 
     if !conditions.is_empty() {
         query_str.push_str(" WHERE ");
@@ -143,6 +157,9 @@ pub async fn get_relationships(
     }
     if let Some(target) = query.target_id {
         query_exec = query_exec.bind(("target", target));
+    }
+    if let Some(project) = query.project_id {
+        query_exec = query_exec.bind(("project", project));
     }
     let result = timeout(Duration::from_secs(5), query_exec).await;
 

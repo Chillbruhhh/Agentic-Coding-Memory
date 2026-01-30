@@ -8,9 +8,9 @@ import { GraphLegend } from './GraphLegend';
 import { transformAmpToGraph, GraphNode, GraphLink } from '../utils/graphDataAdapter';
 
 export const KnowledgeGraph: React.FC = () => {
-  const { codebases, objects, relationships, loading, error } = useCodebases();
+  const { objects, relationships, loading, error } = useCodebases();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  const [_hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [visibleTypes, setVisibleTypes] = useState<string[]>([
     'function',
@@ -105,7 +105,7 @@ export const KnowledgeGraph: React.FC = () => {
     setHoveredNode(node);
   };
 
-  const handleLinkHover = (link: GraphLink | null) => {
+  const handleLinkHover = (_link: GraphLink | null) => {
     // Handle link hover if needed
   };
 
@@ -142,10 +142,16 @@ export const KnowledgeGraph: React.FC = () => {
       setFileLogLoading(true);
       setFileLogError(null);
       try {
+        // Always use full path to avoid 409 ambiguity errors from CONTAINS matching
+        // For projects, use the id. For files/directories, require the full path.
         const lookup = selectedNode.kind === 'project'
           ? selectedNode.id
-          : (selectedNode.path || selectedNode.name);
-        if (selectedNode.kind === 'project' && (!lookup || lookup === '.')) {
+          : selectedNode.path;
+        
+        if (!lookup) {
+          throw new Error('Path unavailable for this node. Please reindex this codebase.');
+        }
+        if (selectedNode.kind === 'project' && lookup === '.') {
           throw new Error('Project id unavailable. Reindex to store a valid project node.');
         }
         const response = await fetch(`http://localhost:8105/v1/codebase/file-log-objects/${encodeURIComponent(lookup)}`);

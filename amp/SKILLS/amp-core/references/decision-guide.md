@@ -6,6 +6,21 @@ Flowcharts for choosing the right AMP tool for your situation.
 
 ---
 
+## Required Cache Rituals
+
+### On Session Start (ALWAYS)
+```
+amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+```
+
+### After Context Compact (ALWAYS)
+```
+amp_cache_compact(scope_id: "project:X")  # Preserve learnings first
+amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+```
+
+---
+
 ## Which Tool Should I Use?
 
 ### Need to remember something?
@@ -31,7 +46,7 @@ Is it short-term working memory?
 
 ```
 Do you need compact working memory?
-├─ YES: amp_cache_get
+├─ YES: amp_cache_read
 │   └─ Use for: session start, agent handoff, context refresh
 │
 └─ NO: Do you have a specific search query?
@@ -48,7 +63,7 @@ Do you need compact working memory?
 ```
 About to modify a file?
 ├─ YES: amp_filelog_get first
-│   └─ Then: make changes, then amp_filelog_update
+│   └─ Then: make changes, then amp_file_sync
 │
 └─ NO: Need file content from memory?
     ├─ YES: amp_file_content_get
@@ -60,11 +75,9 @@ About to modify a file?
 ### Multi-agent scenario?
 
 ```
-Multiple agents might touch same resource?
-├─ YES: amp_lease_acquire before work
-│   └─ Then: do work, then amp_lease_release
-│
-└─ NO: Proceed without coordination
+Need awareness of what others are doing?
+- YES: amp_focus(action: "list")
+- NO: Proceed without coordination
 ```
 
 ---
@@ -77,7 +90,7 @@ Multiple agents might touch same resource?
 | Purpose | Working memory | Historical record |
 | Size | Compact (1-3 facts) | Detailed |
 | Dedup | Automatic semantic | None |
-| Query method | amp_cache_get | amp_query, amp_list |
+| Query method | amp_cache_read | amp_query, amp_list |
 
 **Use Cache when**:
 - Learning something during work
@@ -186,14 +199,14 @@ Does this decision:
 - Is it common knowledge? → NO, skip
 ```
 
-### "Should I track this as a run?"
+### "Should I track this as a focus?"
 
 ```
-Is this:
-- A bounded task with clear goal? → YES, track it
-- Multiple steps to coordinate? → YES, track it
-- Just answering a question? → NO, skip
-- Quick one-off action? → NO, skip
+Is this a bounded task with clear goal?
+├─ YES: amp_focus(action: "set")
+│   └─ Use for: current task plan and audit trail
+│
+└─ NO: Skip focus tracking
 ```
 
 ---
@@ -202,7 +215,7 @@ Is this:
 
 | Error | Meaning | Action |
 |-------|---------|--------|
-| 409 Conflict | Resource leased | Wait and retry, or work on different resource |
+| 409 Conflict | Ambiguous path | Provide a more specific file path |
 | 404 Not Found | Object doesn't exist | Check ID, might be deleted |
 | 500 Internal Error | Server issue | Retry with backoff |
 | Timeout | Query too slow | Reduce limit, narrow filters |
@@ -212,31 +225,23 @@ Is this:
 
 ## Quick Reference Card
 
-```
-┌─────────────────────────────────────────────────────────┐
-│ CACHE                                                    │
-│   amp_cache_get(scope_id, token_budget=600)             │
-│   amp_cache_write(scope_id, items=[{kind, preview}])    │
-├─────────────────────────────────────────────────────────┤
-│ SEARCH                                                   │
-│   amp_query(query, mode="hybrid", limit=5)              │
-│   amp_list(type, limit=10)                              │
-│   amp_trace(object_id, depth=2)                         │
-├─────────────────────────────────────────────────────────┤
-│ WRITE                                                    │
-│   amp_write_artifact(type, title, ...)                  │
-│     type: "decision" | "changeset" | "note" | "filelog" │
-├─────────────────────────────────────────────────────────┤
-│ FILES                                                    │
-│   amp_filelog_get(path)                                 │
-│   amp_filelog_update(path, summary)                     │
-├─────────────────────────────────────────────────────────┤
-│ RUNS                                                     │
-│   amp_run_start(goal, repo_id, agent_name)              │
-│   amp_run_end(run_id, status, outputs, summary)         │
-├─────────────────────────────────────────────────────────┤
-│ COORDINATION                                             │
-│   amp_lease_acquire(resource, duration, agent_id)       │
-│   amp_lease_release(lease_id)                           │
-└─────────────────────────────────────────────────────────┘
-```
+Cache:
+- amp_cache_read(scope_id, query?, include_content?)
+- amp_cache_read(scope_id, block_id)
+- amp_cache_write(scope_id?, kind, content)
+- amp_cache_compact(scope_id?)
+
+Search:
+- amp_query(query, mode="hybrid", limit=5)
+- amp_list(type, limit=10)
+- amp_trace(object_id, depth=2)
+
+Write:
+- amp_write_artifact(type, title, ...)
+
+Files:
+- amp_filelog_get(path)
+- amp_file_sync(path, action, summary)
+
+Focus:
+- amp_focus(action, title?, plan?, summary?, files_changed?)

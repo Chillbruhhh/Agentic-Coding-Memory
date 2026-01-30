@@ -21,32 +21,32 @@ Skills use **progressive disclosure**: SKILL.md provides overview, references/ c
 ## Available Skills
 
 ### `amp-core`
-Core guidance for all 17 AMP MCP tools covering:
+Core guidance for the AMP MCP tools covering:
 - **Episodic Memory Cache** (block-based rolling window)
 - **File Provenance** (sync files across all memory layers)
 - **Discovery & Search** (finding knowledge)
 - **Writing Artifacts** (decisions, changesets, notes)
-- **Run Tracking** (execution auditing)
-- **Coordination** (multi-agent leases)
+- **Focus Tracking** (session focus and outputs)
 
 **Load when**: Working with persistent memory, shared state, or code provenance.
 
 ## Skill Structure
 
 ```
-skillS/
-├── README.md              # This file
-├── INSTRUCTIONS.md        # AGENTS.md integration guide
-└── amp-core/
-    ├── SKILL.md           # Main skill file (load first)
-    └── references/
-        ├── cache-guide.md         # Episodic memory & two-phase retrieval
-        ├── file-sync-guide.md     # File sync across all layers
-        ├── tool-reference.md      # All 17 tools with parameters
-        ├── artifact-guidelines.md # When/why to create artifacts
-        ├── workflows.md           # Step-by-step patterns
-        ├── examples.md            # Real-world examples
-        └── decision-guide.md      # Flowcharts for tool selection
+skills/
+|-- README.md              # This file
+|-- INSTRUCTIONS.md        # AGENTS.md integration guide
+`-- amp-core/
+    |-- SKILL.md           # Main skill file (load first)
+    `-- references/
+        |-- cache-guide.md         # Episodic memory & two-phase retrieval
+        |-- file-sync-guide.md     # File sync across all layers
+        |-- tool-reference.md      # Tool parameters
+        |-- tool-map.md            # Quick reference for tool choice
+        |-- artifact-guidelines.md # When/why to create artifacts
+        |-- workflows.md           # Step-by-step patterns
+        |-- examples.md            # Real-world examples
+        `-- decision-guide.md      # Flowcharts for tool selection
 ```
 
 ## Quick Reference

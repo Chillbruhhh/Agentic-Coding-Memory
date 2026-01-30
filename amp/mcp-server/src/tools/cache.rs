@@ -83,24 +83,29 @@ pub struct AmpCacheGetInput {
 // Unified Cache Read Tool (replaces amp_cache_search + amp_cache_get)
 // ============================================================================
 
-/// Unified input for reading from cache - search, get specific block, or get current block
+/// Unified input for reading from cache - search, get specific block, list all, or get current block
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct AmpCacheReadInput {
     /// Scope ID (e.g., "project:amp", "workspace:default")
     pub scope_id: String,
 
+    // List all mode parameters
+    /// List all blocks for the scope (returns newest first, defaults: limit=5, include_open=true)
+    #[serde(default)]
+    pub list_all: Option<bool>,
+
     // Search mode parameters
     /// Search query - if provided, searches closed blocks by summary
     #[serde(default)]
     pub query: Option<String>,
-    /// Maximum blocks to return when searching (default: 5)
+    /// Maximum blocks to return when searching or listing (default: 5)
     #[serde(default)]
     pub limit: Option<usize>,
     /// Return full block content instead of just summaries (default: false)
     #[serde(default)]
     pub include_content: Option<bool>,
-    /// Include the current open block in search results (default: false)
+    /// Include the current open block in results (default: false for search, true for list_all)
     #[serde(default)]
     pub include_open: Option<bool>,
 
@@ -315,9 +320,10 @@ pub async fn handle_cache_get(
 // Unified Cache Read Handler
 // ============================================================================
 
-/// Unified cache read - handles search, get specific block, or get current block
+/// Unified cache read - handles list all, search, get specific block, or get current block
 ///
 /// Behavior:
+/// - list_all=true → list newest blocks (default: 5, include_open=true)
 /// - query + include_content=false → search (return summaries)
 /// - query + include_content=true → search + return full content
 /// - block_id → get specific block (full content)
@@ -332,7 +338,30 @@ pub async fn handle_cache_read(
         return Ok(vec![Content::text(format_block(&result)?)]);
     }
 
-    // Case 2: Search mode (query provided)
+    // Case 2: List all blocks mode (newest first, includes open block by default)
+    if input.list_all.unwrap_or(false) {
+        let limit = input.limit.unwrap_or(5);
+        let include_content = input.include_content.unwrap_or(false);
+        // Default to true for list_all - open block is current work, should be visible
+        let include_open = input.include_open.unwrap_or(true);
+
+        let payload = serde_json::json!({
+            "scope_id": input.scope_id,
+            "query": "*",  // Wildcard = no filtering, returns all
+            "limit": limit,
+            "include_open": include_open,
+        });
+
+        let result = client.cache_block_search(payload).await?;
+
+        if include_content {
+            return format_list_with_content(client, &result, &input.scope_id).await;
+        } else {
+            return Ok(vec![Content::text(format_list_summaries(&result, &input.scope_id)?)]);
+        }
+    }
+
+    // Case 3: Search mode (query provided)
     if let Some(query) = &input.query {
         let limit = input.limit.unwrap_or(5);
         let include_content = input.include_content.unwrap_or(false);
@@ -356,7 +385,7 @@ pub async fn handle_cache_read(
         }
     }
 
-    // Case 3: Get current open block (no query, no block_id)
+    // Case 4: Get current open block (no query, no block_id, no list_all)
     match client.cache_block_current(&input.scope_id).await? {
         Some(block) => Ok(vec![Content::text(format_block(&block)?)]),
         None => Ok(vec![Content::text(format!(
@@ -365,6 +394,140 @@ pub async fn handle_cache_read(
         ))]),
     }
 }
+
+// ============================================================================
+// List All Blocks Formatting
+// ============================================================================
+
+/// Format list results as summaries (default for list_all)
+/// Open blocks show item count, closed blocks show ~200 token summary
+fn format_list_summaries(result: &serde_json::Value, scope_id: &str) -> Result<String> {
+    let mut output = format!("Cache Blocks for scope: {}\n", scope_id);
+    output.push_str(&"=".repeat(50));
+    output.push('\n');
+
+    if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
+        if matches.is_empty() {
+            output.push_str("\nNo blocks found in this scope.\n");
+            output.push_str("\nTip: Use amp_cache_write to create cache entries.\n");
+        } else {
+            output.push_str(&format!("Showing {} most recent blocks:\n\n", matches.len()));
+
+            for (idx, m) in matches.iter().enumerate() {
+                let block_id = m.get("block_id").and_then(|v| v.as_str()).unwrap_or("?");
+                let summary = m.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+                let relevance = m.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                let created = m.get("created_at").and_then(|v| v.as_str()).unwrap_or("");
+
+                // Determine status: open blocks have relevance=1.0 and dynamic summary
+                let is_open = relevance == 1.0 && (summary.starts_with("[") || summary.contains("[open block"));
+                let status = if is_open { "open" } else { "closed" };
+
+                output.push_str(&format!("{}. [{}] {}\n", idx + 1, status, block_id));
+
+                if !created.is_empty() {
+                    output.push_str(&format!("   Created: {}\n", created));
+                }
+
+                if !summary.is_empty() {
+                    // Truncate long summaries to ~200 chars for readability
+                    let display_summary = if summary.len() > 200 {
+                        format!("{}...", &summary[..200])
+                    } else {
+                        summary.to_string()
+                    };
+                    output.push_str(&format!("   Summary: {}\n", display_summary));
+                }
+                output.push('\n');
+            }
+
+            output.push_str("Tip: Use include_content=true for full block content, or block_id to get a specific block.\n");
+        }
+    } else {
+        output.push_str("\nNo blocks found in this scope.\n");
+    }
+
+    Ok(output)
+}
+
+/// Format list results with full block content
+async fn format_list_with_content(
+    client: &crate::amp_client::AmpClient,
+    result: &serde_json::Value,
+    scope_id: &str,
+) -> Result<Vec<Content>> {
+    let mut output = format!("Cache Blocks for scope: {} (with content)\n", scope_id);
+    output.push_str(&"=".repeat(50));
+    output.push('\n');
+
+    if let Some(matches) = result.get("matches").and_then(|v| v.as_array()) {
+        if matches.is_empty() {
+            output.push_str("\nNo blocks found in this scope.\n");
+            output.push_str("\nTip: Use amp_cache_write to create cache entries.\n");
+        } else {
+            output.push_str(&format!("Showing {} most recent blocks:\n", matches.len()));
+
+            for (idx, m) in matches.iter().enumerate() {
+                let block_id = m.get("block_id").and_then(|v| v.as_str()).unwrap_or("?");
+                let relevance = m.get("relevance").and_then(|v| v.as_f64()).unwrap_or(0.0);
+
+                // Determine status from relevance (open blocks get 1.0)
+                let is_open = relevance == 1.0;
+                let status = if is_open { "open" } else { "closed" };
+
+                output.push_str(&format!(
+                    "\n[{}/{}] {} [{}]\n",
+                    idx + 1, matches.len(), block_id, status
+                ));
+                output.push_str(&"-".repeat(40));
+                output.push('\n');
+
+                // Fetch full block content
+                match client.cache_block_get(block_id).await {
+                    Ok(block) => {
+                        let token_count = block.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        output.push_str(&format!("Tokens: {}/1800\n", token_count));
+
+                        if let Some(summary) = block.get("summary").and_then(|v| v.as_str()) {
+                            if !summary.is_empty() && !is_open {
+                                output.push_str(&format!("Summary: {}\n", summary));
+                            }
+                        }
+
+                        if let Some(items) = block.get("items").and_then(|v| v.as_array()) {
+                            output.push_str(&format!("Items ({}):\n", items.len()));
+                            for item in items {
+                                let kind = item.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+                                let content = item.get("content").and_then(|v| v.as_str()).unwrap_or("");
+                                let importance = item.get("importance").and_then(|v| v.as_f64()).unwrap_or(0.5);
+                                let icon = match kind {
+                                    "fact" => "-",
+                                    "decision" => "*",
+                                    "snippet" => ">",
+                                    "warning" => "!",
+                                    _ => "?",
+                                };
+                                output.push_str(&format!("  {} [{}] {}\n", icon, kind, content));
+                                if importance > 0.7 {
+                                    output.push_str(&format!("    (importance: {:.1})\n", importance));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        output.push_str(&format!("  (Error fetching block: {})\n", e));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(vec![Content::text(output)])
+}
+
+// ============================================================================
+// Search Formatting
+// ============================================================================
 
 /// Format search results as summaries only
 fn format_search_summaries(result: &serde_json::Value, query: &str) -> Result<String> {

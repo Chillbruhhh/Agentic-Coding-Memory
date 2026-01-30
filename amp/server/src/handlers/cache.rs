@@ -235,22 +235,53 @@ pub struct BlockWriteResponse {
     pub evicted_block: Option<String>,
 }
 
-/// Write an item to the current open cache block
-pub async fn block_write(
-    State(state): State<AppState>,
-    Json(request): Json<BlockWriteRequest>,
-) -> Result<Json<BlockWriteResponse>, (StatusCode, String)> {
+fn normalize_run_id(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('⟨')
+        .trim_matches('⟩')
+        .trim_matches('`')
+        .trim_start_matches("objects:")
+        .to_string()
+}
+
+async fn fetch_active_run_ids_for_project(state: &AppState, project_id: &str) -> Vec<String> {
+    let query = r#"
+        SELECT VALUE run_id FROM agent_connections
+        WHERE status = 'connected'
+          AND expires_at > time::now()
+          AND (project_id = $project_id OR project_id IS NONE)
+          AND run_id IS NOT NONE
+    "#;
+    let mut response = match state.db.client
+        .query(query)
+        .bind(("project_id", project_id.to_string()))
+        .await
+    {
+        Ok(response) => response,
+        Err(_) => return Vec::new(),
+    };
+    take_json_values(&mut response, 0)
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect()
+}
+
+async fn write_block_for_scope(
+    state: &AppState,
+    scope_id: &str,
+    request: &BlockWriteRequest,
+) -> Result<BlockWriteResponse, (StatusCode, String)> {
     // Estimate tokens for this item
     let item_tokens = request.content.len() / 4;
 
     // Find or create open block for this scope
     let find_query = "SELECT <string>id AS id_str, scope_id, sequence, status, items, token_count FROM cache_block WHERE scope_id = $scope_id AND status = 'open' LIMIT 1";
 
-    tracing::debug!("Looking for open cache_block with scope_id = '{}'", request.scope_id);
+    tracing::debug!("Looking for open cache_block with scope_id = '{}'", scope_id);
 
     let mut response = state.db.client
         .query(find_query)
-        .bind(("scope_id", request.scope_id.clone()))
+        .bind(("scope_id", scope_id.to_string()))
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
@@ -277,7 +308,7 @@ pub async fn block_write(
         tracing::debug!("Creating block with query: {}", create_query);
         state.db.client
             .query(&create_query)
-            .bind(("scope_id", request.scope_id.clone()))
+            .bind(("scope_id", scope_id.to_string()))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         tracing::debug!("Created new block: {}", new_id);
@@ -292,13 +323,13 @@ pub async fn block_write(
 
     if token_count + item_tokens >= TOKEN_THRESHOLD {
         // Close current block
-        let close_result = close_block(&state, &block_id, &request.scope_id).await;
+        let close_result = close_block(state, &block_id, scope_id).await;
         if let Err(e) = close_result {
             tracing::warn!("Failed to close block: {}", e);
         }
 
         // Check if we need to evict oldest block
-        evicted_block = evict_oldest_if_needed(&state, &request.scope_id).await.ok().flatten();
+        evicted_block = evict_oldest_if_needed(state, scope_id).await.ok().flatten();
 
         // Create new block - use backticks to escape UUID with hyphens
         let new_seq = sequence + 1;
@@ -310,7 +341,7 @@ pub async fn block_write(
         );
         state.db.client
             .query(&create_query)
-            .bind(("scope_id", request.scope_id.clone()))
+            .bind(("scope_id", scope_id.to_string()))
             .bind(("seq", new_seq as i32))
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -346,14 +377,38 @@ pub async fn block_write(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(BlockWriteResponse {
+    Ok(BlockWriteResponse {
         block_id: final_block_id,
         block_status: final_status,
         token_count,
         items_in_block: items.len(),
         new_block_id,
         evicted_block,
-    }))
+    })
+}
+
+/// Write an item to the current open cache block
+pub async fn block_write(
+    State(state): State<AppState>,
+    Json(request): Json<BlockWriteRequest>,
+) -> Result<Json<BlockWriteResponse>, (StatusCode, String)> {
+    let primary = write_block_for_scope(&state, &request.scope_id, &request).await?;
+
+    if let Some(project_id) = request.scope_id.strip_prefix("project:") {
+        let run_ids = fetch_active_run_ids_for_project(&state, project_id).await;
+        for run_id in run_ids {
+            let normalized_run = normalize_run_id(&run_id);
+            if normalized_run.is_empty() {
+                continue;
+            }
+            let run_scope = format!("run:{}", normalized_run);
+            let session_scope = format!("session:{}", normalized_run);
+            let _ = write_block_for_scope(&state, &run_scope, &request).await;
+            let _ = write_block_for_scope(&state, &session_scope, &request).await;
+        }
+    }
+
+    Ok(Json(primary))
 }
 
 #[derive(Debug, Deserialize)]
@@ -606,8 +661,45 @@ pub async fn block_current(
             created_at: block.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         }))
     } else {
-        // No open block exists - return empty response indicating none found
-        Err((StatusCode::NOT_FOUND, format!("No open block found for scope: {}", scope_id)))
+        // No open block exists - create a new empty block and return it
+        let seq_query = "SELECT sequence FROM cache_block WHERE scope_id = $scope_id ORDER BY sequence DESC LIMIT 1";
+        let mut seq_response = state.db.client
+            .query(seq_query)
+            .bind(("scope_id", scope_id.clone()))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let seq_values = take_json_values(&mut seq_response, 0);
+        let last_seq = seq_values
+            .first()
+            .and_then(|v| v.get("sequence"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let new_seq = last_seq + 1;
+        let uuid = uuid::Uuid::new_v4();
+        let new_id = format!("cache_block:`{}`", uuid);
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let create_query = format!(
+            "CREATE {} SET scope_id = $scope_id, sequence = $seq, status = 'open', items = [], token_count = 0, created_at = time::now()",
+            new_id
+        );
+
+        state.db.client
+            .query(&create_query)
+            .bind(("scope_id", scope_id.clone()))
+            .bind(("seq", new_seq as i32))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        Ok(Json(BlockGetResponse {
+            block_id: new_id,
+            status: "open".to_string(),
+            summary: None,
+            items: Vec::new(),
+            token_count: 0,
+            created_at,
+        }))
     }
 }
 

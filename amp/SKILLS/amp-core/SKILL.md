@@ -24,16 +24,16 @@ Load this skill when you need to:
 |------|-----------|
 | Cache & episodic memory | `references/cache-guide.md` |
 | File sync & provenance | `references/file-sync-guide.md` |
-| Which tool to use? | `references/tool-reference.md` |
+| Which tool to use? | `references/tool-map.md` |
+| Tool parameters | `references/tool-reference.md` |
 | When to create artifacts | `references/artifact-guidelines.md` |
 
-## Tool Categories (16 tools)
+## Tool Categories (13 tools)
 
-### Episodic Memory Cache (4 tools)
+### Episodic Memory Cache (3 tools)
 - `amp_cache_write` - Write item to current block (auto-closes at ~1800 tokens)
 - `amp_cache_compact` - Close current block, open new one (call on conversation compact)
-- `amp_cache_search` - Search closed block summaries (two-phase retrieval)
-- `amp_cache_get` - Get block by ID or legacy memory pack
+- `amp_cache_read` - Unified read: search blocks, get specific block, or get current context
 
 ### File Provenance (2 tools)
 - `amp_file_sync` - Sync file across all 3 layers (temporal, vector, graph)
@@ -48,16 +48,12 @@ Load this skill when you need to:
 ### Writing Artifacts (1 tool)
 - `amp_write_artifact` - Create decisions, changesets, notes with graph links
 
-### Run Tracking (2 tools)
-- `amp_run_start` - Begin agent execution tracking
-- `amp_run_end` - Complete execution with outputs
+### Focus Tracking (1 tool)
+- `amp_focus` - Manage session focus and recorded outputs (list, get, set, complete, end)
 
-### Coordination (2 tools)
-- `amp_lease_acquire` - Lock shared resources
-- `amp_lease_release` - Release locks
-
-### Utility (1 tool)
+### Utility (2 tools)
 - `amp_file_content_get` - Retrieve indexed file content from chunks
+- `amp_file_path_resolve` - Resolve canonical path for ambiguous/relative file paths
 
 ## Core Principle: Two-Phase Retrieval
 
@@ -67,15 +63,35 @@ Cache uses block-based storage with two-phase retrieval:
 
 This reduces context from 2000-5000 tokens to 200-400 tokens for initial search.
 
-## Startup Workflow
+## REQUIRED RITUALS
 
-On startup, check for existing cache context:
+These rituals are **MANDATORY** for proper memory continuity.
+
+### Session Start (ALWAYS)
+
+Execute at the start of every new session:
+
+**Option 1: List all recent blocks (recommended, token-efficient)**
+```
+amp_cache_read(scope_id: "project:{id}", list_all: true)
+```
+Returns the 5 newest blocks with summaries (~200 tokens each). Use `include_content: true` to fetch full block content.
+
+**Option 2: Search by query**
+```
+amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)
+```
+
+### After Context Compact (ALWAYS)
+
+Execute immediately when conversation context is compacted/summarized:
 
 ```
-1. amp_cache_search(scope_id: "project:{id}", query: "recent work")
-2. If relevant blocks found: amp_cache_get(block_id: "...")
-3. Otherwise: proceed with fresh context
+amp_cache_compact(scope_id: "project:{id}")
+amp_cache_read(scope_id: "project:{id}", query: "recent work", include_content: true)
 ```
+
+**Why**: Context compaction discards conversation history. Without these rituals, insights from prior work are lost forever.
 
 ## Post-Edit Workflow
 
@@ -117,16 +133,27 @@ agent:{agent_id}      - Private to one agent
 
 ## Artifact Philosophy
 
-Artifacts exist to serve **future agents**. Before creating, ask:
+Artifacts are **permanent long-term memory** for anything useful about the codebase. They exist to serve **future agents** - including yourself after context resets.
+
+Before creating, ask:
 
 > "Would a future agent benefit from knowing this?"
 
-Create artifacts that capture:
-- **Preferences** - Choices you made and why
-- **Discoveries** - Non-obvious things you learned
-- **Effective operations** - Patterns that worked well
+**If yes or maybe → create an artifact.** Artifacts are cheap. Re-learning is expensive.
 
-Skip artifacts when the code is self-explanatory or it's common knowledge.
+Artifacts can store **literally anything useful**:
+- **User preferences** - "User wants verbose logging", "Prefers functional components"
+- **Project conventions** - "snake_case for DB, camelCase for API"
+- **Architectural choices** - Decisions made and why
+- **Refactoring rationale** - Why code was restructured
+- **Dependency choices** - Why one library over another
+- **Workarounds** - Temporary hacks and when to remove them
+- **Production gotchas** - Non-obvious runtime behavior
+- **Historical context** - How things evolved over time
+
+**Don't limit yourself to decisions and changesets.** Use "note" artifacts for anything that doesn't fit elsewhere.
+
+Skip artifacts only when the code is self-explanatory or it's common knowledge.
 
 ## Non-Goals
 

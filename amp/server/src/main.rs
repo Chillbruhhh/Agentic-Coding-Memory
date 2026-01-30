@@ -233,6 +233,7 @@ fn api_routes() -> Router<AppState> {
         // Settings endpoints
         .route("/settings", get(handlers::settings::get_settings))
         .route("/settings", put(handlers::settings::update_settings))
+        .route("/settings/nuclear-delete", post(handlers::settings::nuclear_delete))
         // Artifact endpoints - unified write across all 3 memory layers
         .route("/artifacts", post(handlers::artifacts::write_artifact))
         .route("/artifacts", get(handlers::artifacts::list_artifacts))

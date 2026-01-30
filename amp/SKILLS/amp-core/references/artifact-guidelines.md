@@ -4,6 +4,29 @@ When and why to create artifacts for effective agent memory.
 
 ---
 
+## What Artifacts Are For
+
+Artifacts are **permanent long-term memory** for anything useful about the codebase. They persist forever and are fully searchable.
+
+**Artifacts can store literally anything that would help a future agent understand the codebase:**
+
+| Category | Example |
+|----------|---------|
+| **User preferences** | "User prefers functional components over class components" |
+| **Project conventions** | "Use snake_case for DB columns, camelCase for API responses" |
+| **Refactoring rationale** | "Extracted AuthService because auth logic was duplicated in 5 places" |
+| **Architectural decisions** | "Chose microservices over monolith for independent scaling" |
+| **Dependency choices** | "Using axum over actix-web for simpler lifetime management" |
+| **Workarounds** | "setTimeout(0) defers execution due to React 18 batching race condition" |
+| **Historical context** | "This module was part of the monolith, extracted in v2.0 migration" |
+| **Production gotchas** | "Rate limiter resets at midnight UTC, not rolling windows" |
+| **Team decisions** | "We avoid ORMs - team prefers raw SQL for performance visibility" |
+| **External constraints** | "API rate limited to 100 req/min - batch operations required" |
+
+**When in doubt, create an artifact.** Artifacts are cheap. Re-learning is expensive.
+
+---
+
 ## How Artifacts Work
 
 When you call `amp_write_artifact`, it writes to **three memory layers**:
@@ -44,7 +67,11 @@ Before creating any artifact, ask:
 
 That future agent might be you after context resets, a different agent, or someone months later wondering why something was built this way.
 
-**If yes** → create an artifact. **If unsure** → use cache instead (it expires, artifacts don't).
+**If yes** → create an artifact.
+**If maybe** → create an artifact anyway. Better to have it than re-learn it.
+**If no** → skip it, stick creating cache instead. (code is self-explanatory, common knowledge, etc.)
+
+Remember: Artifacts can store **anything useful** - user preferences, conventions, rationale, workarounds, historical context, external constraints. Don't limit yourself to just decisions and changesets.
 
 ---
 
@@ -70,18 +97,24 @@ That future agent might be you after context resets, a different agent, or someo
 
 ---
 
-### 2. Notes - Non-Obvious Discoveries
+### 2. Notes - Anything Worth Remembering
 
-**Create when:** You learned something that isn't obvious from reading the code.
+**Create when:** You learned something, discovered a preference, or have context worth preserving.
+
+Notes are the **most flexible** artifact type. Use them for anything that doesn't fit decisions or changesets:
 
 | Category | Use When |
 |----------|----------|
 | `warning` | Something will break if not handled correctly |
-| `insight` | Pattern or approach worth preserving |
+| `insight` | Pattern, approach, or discovery worth preserving |
 | `todo` | Work that should be tracked beyond this session |
 | `question` | Uncertainty future agents should investigate |
+| `reference` | User preferences, conventions, external constraints |
+
+**Examples:**
 
 ```json
+// Production gotcha
 {
   "type": "note",
   "title": "Rate limiter resets at midnight UTC",
@@ -91,26 +124,110 @@ That future agent might be you after context resets, a different agent, or someo
 }
 ```
 
+```json
+// User preference
+{
+  "type": "note",
+  "title": "User prefers verbose error messages",
+  "category": "reference",
+  "content": "User wants detailed error messages with stack traces in development. Include file paths and line numbers when possible.",
+  "tags": ["user-preference", "error-handling"]
+}
+```
+
+```json
+// Project convention
+{
+  "type": "note",
+  "title": "API naming conventions",
+  "category": "reference",
+  "content": "Use kebab-case for API routes (/user-settings), snake_case for DB columns (user_id), camelCase for JSON responses (userId).",
+  "tags": ["conventions", "api"]
+}
+```
+
+```json
+// Refactoring rationale
+{
+  "type": "note",
+  "title": "Why AuthService was extracted",
+  "category": "insight",
+  "content": "Auth logic was duplicated across UserController, AdminController, and APIController. Extracted to single AuthService to ensure consistent token validation and session handling.",
+  "linked_files": ["src/services/auth.rs"],
+  "tags": ["refactoring", "architecture"]
+}
+```
+
+```json
+// Temporary workaround
+{
+  "type": "note",
+  "title": "setTimeout workaround for React 18 batching",
+  "category": "warning",
+  "content": "Using setTimeout(0) in useEffect to defer state updates. React 18 automatic batching causes race condition with external library. Remove when library updates to support React 18.",
+  "linked_files": ["src/hooks/useDataSync.tsx"],
+  "tags": ["workaround", "react", "temporary"]
+}
+```
+
 **Skip when:** It's in code comments, documented elsewhere, or standard knowledge.
 
 ---
 
 ### 3. Changesets - Completed Work With Context
 
-**Create when:** You completed meaningful work and the "why" adds value beyond the diff.
+**Changesets are the LEAST common artifact type.** Git already tracks what changed. Changesets only add value when they explain **WHY** something was done in a way that isn't obvious from the code or commit message.
+
+**Create when:** 
+- The reasoning behind the change would help future agents understand the codebase
+- You're capturing architectural context that would be lost otherwise
+- The "why" is significantly more valuable than the "what"
 
 ```json
 {
   "type": "changeset",
   "title": "Implement semantic cache for token-efficient context",
-  "description": "Reduces context from 2000+ to ~600 tokens using cosine similarity dedup.",
+  "description": "Reduces context from 2000+ to ~600 tokens using cosine similarity dedup. Previous approach loaded all items, causing context overflow in long sessions. Cosine threshold of 0.85 chosen after testing showed it eliminates 70% of redundant items without losing semantic coverage.",
   "files_changed": ["src/services/cache.rs", "src/handlers/cache.rs"],
   "diff_summary": "+450 lines. New CacheService with get_pack(), write_items(), gc(). TTL-based expiration, importance scoring.",
   "linked_decisions": ["use-surrealdb-for-memory"]
 }
 ```
 
-**Skip when:** Trivial fix, commit message captures everything, no reasoning to add.
+**Skip when (MOST of the time):**
+- Git commit message captures the change adequately
+- You're just listing which files changed (that's what `git diff` is for)
+- There's no "why" that adds value beyond the code itself
+- The change is routine/trivial (bug fix, typo, formatting)
+
+### Changeset Anti-Pattern: The Changelog Trap
+
+**DON'T do this:**
+```json
+{
+  "type": "changeset",
+  "title": "Updated documentation files",
+  "files_changed": ["docs/api.md", "docs/concepts.md", "README.md"],
+  "diff_summary": "Added RRF section, updated endpoints"
+}
+```
+
+This is just a changelog. Git already tracks this. Future agents don't benefit from knowing "files were changed."
+
+**DO this instead (or skip entirely):**
+```json
+{
+  "type": "note",
+  "title": "RRF is how AMP ranks hybrid query results",
+  "category": "insight",
+  "content": "Hybrid queries combine vector, graph, and temporal results using Reciprocal Rank Fusion (RRF) with k=60. Items appearing in multiple retrieval methods get boosted. This is the core ranking algorithm - document it well.",
+  "tags": ["architecture", "retrieval", "rrf"]
+}
+```
+
+The note captures the **insight** (RRF is the ranking algorithm) rather than the **activity** (I updated some docs).
+
+**Rule of thumb:** If your changeset doesn't explain WHY in a way that helps future agents, don't create it. Use a note for the insight, or skip the artifact entirely.
 
 ---
 
@@ -167,6 +284,33 @@ Creates graph relationships for `amp_trace` discovery.
 
 ## Anti-Patterns
 
+### The Changelog Trap (Most Common Mistake)
+
+**This is the #1 artifact anti-pattern.** Creating changesets that just list which files changed.
+
+**Bad:**
+```json
+{
+  "type": "changeset",
+  "title": "RRF Documentation Added to Docs",
+  "files_changed": ["docs/concepts/hybrid-retrieval.md", "docs/api/overview.md"],
+  "diff_summary": "Created new file, updated references"
+}
+```
+
+This adds zero value. Git already tracks file changes. Future agents don't need to know "an agent updated some docs."
+
+**Good:** Either skip the artifact entirely, or capture the **insight**:
+```json
+{
+  "type": "note",
+  "title": "RRF (k=60) is the ranking algorithm for hybrid queries",
+  "category": "insight",
+  "content": "AMP uses Reciprocal Rank Fusion to combine vector, graph, and temporal results. Formula: RRF(d) = Σ 1/(k + rank(d)). Items in multiple result sets get boosted scores. k=60 is the standard value.",
+  "tags": ["architecture", "retrieval"]
+}
+```
+
 ### Artifact Spam
 **Bad:** One artifact per file touched.
 **Good:** One changeset for the completed feature with all files listed.
@@ -183,6 +327,12 @@ Creates graph relationships for `amp_trace` discovery.
 **Bad:** `"linked_decisions": []` when decisions exist
 **Good:** Connect related artifacts for traceability
 
+### Creating Artifacts for Activity, Not Insight
+**Bad:** "Updated 5 files during refactoring session"
+**Good:** "Extracted AuthService because auth logic was duplicated in 5 controllers"
+
+The test: **Does this capture INSIGHT or just ACTIVITY?** Only insights belong in artifacts.
+
 ---
 
 ## Quick Reference
@@ -196,28 +346,38 @@ Creates graph relationships for `amp_trace` discovery.
 - Discovered something non-obvious
 - Hit a gotcha worth warning about
 - Found a pattern that worked well
+- Learned a user preference or project convention
+- Want to capture rationale or historical context
 
-**Create Changeset when:**
-- Completed meaningful work (not trivial)
-- "Why" adds value beyond the diff
+**Create Changeset when (RARE):**
+- The "WHY" behind the change is valuable and non-obvious
+- Architectural context would be lost without it
+- NOT just to record which files changed
 
 **Skip when:**
+- Just listing files changed (use git)
 - Code is self-explanatory
 - Common knowledge for the technology
 - Already documented elsewhere
+- Capturing activity, not insight
 - Unsure → use cache first
 
 ---
 
 ## Summary
 
-Artifacts capture what gets lost when context resets:
+Artifacts are permanent memory for **anything useful about the codebase** - things that get lost when context resets:
 
-1. **Preferences** - Choices and why
-2. **Discoveries** - Non-obvious learnings
-3. **Effective operations** - Patterns that worked
+1. **Preferences** - User and team preferences, conventions, style choices
+2. **Choices** - Decisions made and why, alternatives considered
+3. **Discoveries** - Non-obvious learnings, gotchas, production behavior
+4. **Rationale** - Why refactors happened, why dependencies were chosen
+5. **Context** - Historical background, external constraints, workarounds
+6. **Patterns** - Approaches that worked well, anti-patterns to avoid
 
-**Quality over quantity.** One insightful artifact beats ten noisy ones.
+**Don't limit yourself to the three artifact types.** A "note" can contain anything - user preferences, project conventions, historical context, temporary workarounds, external API quirks, team decisions, or literally anything else worth remembering.
+
+**Quality over quantity** One insightful artifact beats ten noisy ones - but useful artifacts beat zero.
 
 ---
 

@@ -84,9 +84,28 @@ Manually close the current block and open a new one. If scope_id is omitted, the
 
 ### amp_cache_read
 
-Unified tool for reading from the cache - search, get specific block, or get current block.
+Unified tool for reading from the cache - list all, search, get specific block, or get current block.
 
-**Mode 1: Search (summaries only)**
+**Mode 1: List all blocks (recommended for session start)**
+```json
+{
+  "scope_id": "project:my-app",
+  "list_all": true
+}
+```
+Returns the 5 newest blocks (including open block) with ~200 token summaries. Token-efficient way to see what's in the cache.
+
+**Mode 2: List all with full content**
+```json
+{
+  "scope_id": "project:my-app",
+  "list_all": true,
+  "include_content": true
+}
+```
+Returns full item content for all blocks. Use sparingly - can be 7000+ tokens.
+
+**Mode 3: Search (summaries only)**
 ```json
 {
   "scope_id": "project:my-app",
@@ -95,7 +114,7 @@ Unified tool for reading from the cache - search, get specific block, or get cur
 }
 ```
 
-**Mode 2: Search with full content**
+**Mode 4: Search with full content**
 ```json
 {
   "scope_id": "project:my-app",
@@ -104,7 +123,7 @@ Unified tool for reading from the cache - search, get specific block, or get cur
 }
 ```
 
-**Mode 3: Get specific block**
+**Mode 5: Get specific block**
 ```json
 {
   "scope_id": "project:my-app",
@@ -112,7 +131,7 @@ Unified tool for reading from the cache - search, get specific block, or get cur
 }
 ```
 
-**Mode 4: Get current open block**
+**Mode 6: Get current open block**
 ```json
 {
   "scope_id": "project:my-app"
@@ -121,20 +140,24 @@ Unified tool for reading from the cache - search, get specific block, or get cur
 
 **Parameters:**
 - `scope_id` (required): Scope identifier (e.g., "project:amp")
+- `list_all` (optional): List all blocks, newest first (default: false)
 - `query` (optional): Search closed blocks by summary
-- `limit` (optional): Max blocks when searching, default 5
-- `include_content` (optional): Fetch full content with search, default false
+- `limit` (optional): Max blocks when listing/searching, default 5
+- `include_content` (optional): Fetch full content, default false
+- `include_open` (optional): Include open block (default: true for list_all, false for search)
 - `block_id` (optional): Get specific block by ID
 
 **Behavior matrix:**
-| query | block_id | include_content | Result |
-|-------|----------|-----------------|--------|
-| ✓ | - | false | Search → summaries only |
-| ✓ | - | true | Search → full content |
-| - | ✓ | - | Get specific block |
-| - | - | - | Get current open block |
+| list_all | query | block_id | include_content | Result |
+|----------|-------|----------|-----------------|--------|
+| true | - | - | false | List newest → summaries (~1000 tokens) |
+| true | - | - | true | List newest → full content (~7000 tokens) |
+| - | ✓ | - | false | Search → summaries only |
+| - | ✓ | - | true | Search → full content |
+| - | - | ✓ | - | Get specific block |
+| - | - | - | - | Get current open block |
 
-**Efficiency:** Use `include_content=true` when you know you need the full content - saves a round-trip vs search then get.
+**Efficiency:** Use `list_all=true` for session start - gives you the 5 most recent blocks with summaries for ~1000 tokens total.
 
 ## Workflows
 
@@ -143,8 +166,11 @@ Unified tool for reading from the cache - search, get specific block, or get cur
 **Always read cache at the start of every session** to restore prior context.
 
 ```
-# Recommended: One-shot with full content
-amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+# Recommended: List all recent blocks (token-efficient, ~1000 tokens)
+amp_cache_read(scope_id: "project:X", list_all: true)
+
+# Or with full content if you need complete context (~7000 tokens)
+amp_cache_read(scope_id: "project:X", list_all: true, include_content: true)
 ```
 
 This ensures continuity across sessions and prevents re-learning what was already discovered.
@@ -158,7 +184,7 @@ When the conversation context is compacted (summarized), **immediately compact t
 amp_cache_compact(scope_id: "project:X")
 
 # 2. Restore context from cache
-amp_cache_read(scope_id: "project:X", query: "recent work", include_content: true)
+amp_cache_read(scope_id: "project:X", list_all: true, include_content: true)
 ```
 
 **Why this matters**: Context compaction discards conversation history. If you don't compact the cache first, insights from the discarded conversation are lost forever.

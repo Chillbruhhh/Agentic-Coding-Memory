@@ -32,6 +32,8 @@ pub struct CreateRelationshipRequest {
     pub source_id: Uuid,
     pub target_id: Uuid,
     pub metadata: Option<serde_json::Value>,
+    /// Project ID for edge isolation - prevents cross-project graph contamination
+    pub project_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

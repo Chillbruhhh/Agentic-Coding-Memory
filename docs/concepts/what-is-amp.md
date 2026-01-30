@@ -107,28 +107,6 @@ AMP stores four types of memory objects:
 }
 ```
 
-### Hybrid Retrieval
-
-AMP combines three search methods:
-
-**Vector Search** (Semantic)
-```
-Query: "password security"
-Finds: hash_password(), validate_password(), check_strength()
-```
-
-**Graph Traversal** (Relationships)
-```
-Query: "What depends on auth.py?"
-Finds: api.py → auth.py → database.py
-```
-
-**Temporal Filtering** (Time-based)
-```
-Query: "Changes in last 24 hours"
-Finds: Recent modifications and decisions
-```
-
 ### Provenance Tracking
 
 Every object tracks its origin:

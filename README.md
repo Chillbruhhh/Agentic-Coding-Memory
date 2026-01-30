@@ -4,6 +4,8 @@
 
 # Agentic Memory Protocol (AMP)
 
+[![npm version](https://badge.fury.io/js/@chillbruhhh%2Famp-cli.svg)](https://www.npmjs.com/package/@chillbruhhh/amp-cli)
+
 A vendor-neutral protocol for durable, unified memory in agentic software development. AMP provides persistent, shared knowledge for AI agents, enabling seamless coordination, eliminating redundant work, and maintaining complete audit trails across sessions.
 
 Built for the Dynamous-Kiro Hackathon, this implementation demonstrates AMP's capabilities through a coding agent use case—but this is just the beginning. The current system showcases hybrid retrieval (vector + graph + temporal), multi-language code parsing, and real-time knowledge graph visualization, proving AMP's potential as a universal memory substrate.
@@ -30,15 +32,27 @@ docker compose up
 
 ### CLI Installation
 
+**Option 1: Install via npm (Recommended)**
+```bash
+npm install -g @chillbruhhh/amp-cli
+```
+
+**Option 2: Install from source**
 ```bash
 # Windows
 .\scripts\install.ps1
 
 # Linux/macOS
 ./scripts/install.sh
+```
 
+**Usage:**
+```bash
 # Index a codebase (run from project root)
 amp index
+
+# Query indexed code  
+amp index --init-root  # Only Apply if theres no .git folder present and you want to indexfrom this specific folder
 ```
 
 ---
@@ -207,7 +221,7 @@ POST   /v1/relationships        # Create relationship
 GET    /v1/relationships        # Query relationships
 DELETE /v1/relationships/:type/:id  # Delete relationship
 
-# Leases (Multi-Agent Coordination)
+# Leases (Multi-Agent Coordination - designed for a later date ~ not used.)
 POST   /v1/leases/acquire       # Acquire lease
 POST   /v1/leases/release       # Release lease
 POST   /v1/leases/renew         # Renew lease

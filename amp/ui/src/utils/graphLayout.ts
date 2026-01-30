@@ -1,4 +1,3 @@
-import { Vector3 } from 'three';
 import { AmpObject, GraphNode } from '../types/amp';
 
 export const createHierarchicalLayout = (objects: AmpObject[]): GraphNode[] => {
@@ -33,7 +32,7 @@ export const createHierarchicalLayout = (objects: AmpObject[]): GraphNode[] => {
   const spacing = 15;
 
   // Position project nodes
-  projectNodes.forEach((obj, index) => {
+  projectNodes.forEach((obj, _index) => {
     const node = nodeMap.get(obj.id)!;
     node.x = currentX;
     node.y = 0;

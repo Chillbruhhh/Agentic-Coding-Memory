@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { FileExplorer } from './components/FileExplorer';
 import { KnowledgeGraph } from './components/KnowledgeGraph';
@@ -13,7 +13,7 @@ type ViewType = 'explorer' | 'graph' | 'artifacts' | 'sessions' | 'analytics' | 
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('explorer');
-  const [loading, setLoading] = useState(false);
+  const [loading, _setLoading] = useState(false);
 
   const renderContent = () => {
     switch (activeView) {

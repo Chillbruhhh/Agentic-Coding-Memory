@@ -24,21 +24,6 @@ const formatDuration = (durationMs?: number) => {
 
 const normalizeStatus = (status?: string) => (status || 'unknown').toLowerCase();
 
-const statusStyles = (status?: string) => {
-  switch (normalizeStatus(status)) {
-    case 'running':
-      return 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30';
-    case 'completed':
-      return 'bg-sky-500/20 text-sky-300 border-sky-500/30';
-    case 'failed':
-      return 'bg-red-500/20 text-red-300 border-red-500/30';
-    case 'cancelled':
-      return 'bg-amber-500/20 text-amber-300 border-amber-500/30';
-    default:
-      return 'bg-slate-700/40 text-slate-300 border-slate-600/40';
-  }
-};
-
 const isLiveStatus = (status?: string) => normalizeStatus(status) === 'running';
 
 export const Sessions: React.FC = () => {
@@ -273,7 +258,7 @@ export const Sessions: React.FC = () => {
                           Plan
                         </div>
                         <ul className="text-xs text-slate-200 space-y-1">
-                          {activeFocus.plan.map((step, idx) => (
+                          {activeFocus.plan.map((step: string, idx: number) => (
                             <li key={`${step}-${idx}`} className="flex items-start gap-2">
                               <span className="text-slate-500">-</span>
                               <span>{step}</span>
@@ -304,7 +289,7 @@ export const Sessions: React.FC = () => {
                     </div>
                     <div className="flex-1 overflow-y-auto space-y-3">
                       {detail.outputs && detail.outputs.length > 0 ? (
-                        detail.outputs.map((output, idx) => {
+                        detail.outputs.map((output: { type?: string; content?: string; metadata?: any }, idx: number) => {
                           const metadata = output.metadata || {};
                           const isFocusOutput = metadata.kind === 'focus';
                           const filesChanged: string[] = metadata.files_changed || [];
@@ -402,7 +387,7 @@ export const Sessions: React.FC = () => {
                           <div className="text-[10px] uppercase tracking-[0.2em] text-red-300 mb-2 flex items-center gap-2">
                             <HiExclamation /> Errors
                           </div>
-                          {detail.errors.map((err, idx) => (
+                          {detail.errors.map((err: { message?: string; code?: string; context?: any }, idx: number) => (
                             <div key={`${err.code || 'error'}-${idx}`} className="text-xs text-red-200 mb-2">
                               {err.message}
                             </div>
@@ -413,9 +398,16 @@ export const Sessions: React.FC = () => {
                   </div>
 
                   {showCache && (
-                    <div className="flex flex-col border border-border-dark bg-panel-dark/60 rounded-lg overflow-hidden">
-                      <CachePanel runId={detail.id} projectId={detail.project_id} />
-                    </div>
+                    (() => {
+                      const connection = getConnectionForRun(detail.id);
+                      const projectIdForCache = connection?.project_id || detail.project_id;
+                      const runIdForCache = connection?.run_id || detail.id;
+                      return (
+                        <div className="flex flex-col border border-border-dark bg-panel-dark/60 rounded-lg overflow-hidden">
+                          <CachePanel runId={runIdForCache} projectId={projectIdForCache} />
+                        </div>
+                      );
+                    })()
                   )}
                 </div>
               )}

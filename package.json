@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/Chillbruhhh/Agentic-Coding-Memory#readme",
   "dependencies": {
+    "@chillbruhhh/amp-cli": "^0.1.0",
     "figlet": "^1.9.4"
   }
 }

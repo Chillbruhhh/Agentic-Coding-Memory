@@ -1,48 +1,66 @@
-# AMP CLI - The Bridge
+# AMP CLI
 
-Terminal-based interface for integrating coding agents with AMP (Agentic Memory Protocol).
+Terminal-based interface used to index repos/codebases for [Agentic Memory Protocol](https://github.com/Chillbruhhh/Agentic-Memory-Protocol)
 
 ## Installation
 
+### Global Installation (Recommended)
+
 ```bash
-cd amp/cli
-cargo build --release
+npm install -g @chillbruhhh/amp-cli
 ```
 
-## Usage
+### Local Installation
 
-### Start a session with an agent
 ```bash
-amp start "your-agent-command"
+npm install @chillbruhhh/amp-cli
+npx amp --help
 ```
 
-### Check status
+## Prerequisites
+
+- **Node.js 14+** (for npm installation)
+- **Rust/Cargo** (for building from source)
+- **AMP Server** running on http://localhost:8105
+
+## Quick Start
+
 ```bash
-amp status
+# Show help
+amp --help
+
+# Index a codebase
+amp index
+
+# Index a codebase specific path
+amp index /path/to/project
+
 ```
 
-### View session history
-```bash
-amp history
-```
+## Supported Languages
 
-### Launch interactive TUI
-```bash
-amp tui
-```
+- Python
+- TypeScript/JavaScript
+- Rust
+- Go
+- Java
+- C/C++
+- C#
+- Ruby
+- PHP
+- Shell scripts
 
-## Configuration
 
-Set the AMP server URL:
-```bash
-export AMP_SERVER_URL=http://localhost:8105
-```
+## Note
 
-## Features
+*All other cli commands are not currently intended to be used yet and will be modified and removed in future updates*
 
-- ✅ Session lifecycle management
-- ✅ Agent process spawning and monitoring
-- ✅ Automatic git diff capture
-- ✅ Lease-based heartbeat system
-- ✅ Interactive TUI interface
-- ✅ Session persistence and history
+## License
+
+See [LICENSE](../../LICENSE) in the repository root.
+
+## Links
+
+- [GitHub Repository](https://github.com/Chillbruhhh/Agentic-Coding-Memory)
+- [Documentation](https://github.com/Chillbruhhh/Agentic-Coding-Memory/tree/main/docs)
+- [Report Issues](https://github.com/Chillbruhhh/Agentic-Coding-Memory/issues)

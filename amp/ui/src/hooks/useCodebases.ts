@@ -48,10 +48,9 @@ export const useCodebases = () => {
         .replace(/^\//, '')
         .toLowerCase();
     };
-    const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
+const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
 
     // Separate objects by kind
-    const projectObjs = objects.filter(obj => normalizeKind(obj.kind) === 'project');
     const dirObjs = objects.filter(obj => normalizeKind(obj.kind) === 'directory');
     const fileObjs = objects.filter(obj => normalizeKind(obj.kind) === 'file');
     const codeSymbols = objects.filter(obj => {
@@ -139,13 +138,18 @@ export const useCodebases = () => {
       setError(null);
 
       // Fetch real codebase data from AMP server using query endpoint
+      // Filter to only graphable types to avoid FileLog/FileChunk/EpisodicBlock
+      // consuming limit slots and causing truncation across multiple codebases
       const queryResponse = await fetch('http://localhost:8105/v1/query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          limit: 1000 // Just get objects without text filter
+          limit: 10000,
+          filters: {
+            type: ['symbol', 'Symbol', 'file', 'File', 'note', 'decision', 'changeset', 'artifact_core']
+          }
         })
       });
       
@@ -170,7 +174,7 @@ export const useCodebases = () => {
       
       console.log('Extracted objects:', objects.slice(0, 3)); // Debug first 3 objects
 
-      objects = objects.filter(obj => {
+      objects = objects.filter((obj: any) => {
         const objType = (obj.type || '').toLowerCase();
         return ['symbol', 'file', 'filelog', 'filechunk', 'note', 'decision', 'changeset', 'artifact_core'].includes(objType);
       });

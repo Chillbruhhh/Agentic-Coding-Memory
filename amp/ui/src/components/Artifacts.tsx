@@ -12,7 +12,6 @@ import { Artifact, ArtifactType } from '../types/amp';
 // Type labels for display
 const TYPE_LABELS: Record<ArtifactType, string> = {
   decision: 'Decision',
-  filelog: 'File Log',
   note: 'Note',
   changeset: 'Changeset'
 };
@@ -139,58 +138,7 @@ export const Artifacts: React.FC = () => {
               )}
             </div>
           </div>
-        );
-
-      case 'filelog':
-        return (
-          <div className="p-4 space-y-4 overflow-y-auto">
-            <div className="flex items-center gap-2 mb-4">
-              <SiObsidian className="w-5 h-5 text-red-500" />
-              <h3 className="text-lg font-semibold text-slate-200 flex-1">{selectedDetail.title}</h3>
-              <button
-                onClick={handleDelete}
-                className="p-1.5 rounded text-slate-400 hover:text-red-300 hover:bg-red-900/20 transition-colors"
-                title="Delete artifact"
-              >
-                <GiTrashCan className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <h4 className="text-xs uppercase text-slate-500 mb-1">File Path</h4>
-                <code className="text-sm text-blue-400 bg-slate-900/50 p-2 rounded block font-mono">{selectedDetail.file_path}</code>
-              </div>
-              <div>
-                <h4 className="text-xs uppercase text-slate-500 mb-1">Summary</h4>
-                <p className="text-sm text-slate-300 bg-slate-900/50 p-3 rounded">{selectedDetail.summary}</p>
-              </div>
-              {selectedDetail.symbols && selectedDetail.symbols.length > 0 && (
-                <div>
-                  <h4 className="text-xs uppercase text-slate-500 mb-1">Symbols</h4>
-                  <div className="flex flex-wrap gap-1">
-                    {selectedDetail.symbols.map((sym, i) => (
-                      <span key={i} className="text-xs px-2 py-1 bg-blue-900/30 text-blue-300 rounded font-mono">{sym}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
-              {selectedDetail.change_history && selectedDetail.change_history.length > 0 && (
-                <div>
-                  <h4 className="text-xs uppercase text-slate-500 mb-1">Change History</h4>
-                  <div className="space-y-2">
-                    {selectedDetail.change_history.map((change, i) => (
-                      <div key={i} className="text-sm bg-slate-900/50 p-2 rounded">
-                        <span className="text-slate-500">{formatDate(change.timestamp)}</span>
-                        <span className="text-slate-400 mx-2">-</span>
-                        <span className="text-slate-300">{change.description}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        );
+);
 
       case 'note':
         return (

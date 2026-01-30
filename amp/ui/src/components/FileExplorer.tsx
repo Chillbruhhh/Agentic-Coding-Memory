@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { HiFolder, HiFolderOpen, HiChevronRight, HiChevronDown, HiSearch, HiDocumentText, HiCode, HiX } from 'react-icons/hi';
-import { IoCreateOutline } from 'react-icons/io5';
 import { BiFile, BiGitBranch } from 'react-icons/bi';
 import { SiGraphql } from 'react-icons/si';
 import { GiTrashCan } from 'react-icons/gi';
@@ -226,12 +225,6 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
           <h2 className="text-sm font-bold text-slate-200 uppercase tracking-wider">
             Parsed Codebases
           </h2>
-          <button 
-            onClick={refetch}
-            className="p-1 hover:bg-white/5 rounded text-slate-400 hover:text-slate-200 transition-colors"
-          >
-            <IoCreateOutline size={16} />
-          </button>
         </div>
         <div className="flex items-center gap-2">
           <div className="relative group">

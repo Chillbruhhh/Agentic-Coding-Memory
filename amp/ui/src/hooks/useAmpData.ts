@@ -34,7 +34,7 @@ export const useAmpData = () => {
           const mockData = [
             {
               id: '1',
-              type: 'Symbol',
+              type: 'symbol' as const,
               name: 'main',
               path: 'amp/server/src/main.rs',
               language: 'rust',
@@ -47,7 +47,7 @@ export const useAmpData = () => {
             },
             {
               id: '2', 
-              type: 'Symbol',
+              type: 'symbol' as const,
               name: 'KnowledgeGraph',
               path: 'amp/ui/src/components/KnowledgeGraph.tsx',
               language: 'typescript',
@@ -60,7 +60,7 @@ export const useAmpData = () => {
             },
             {
               id: '3',
-              type: 'Decision',
+              type: 'symbol' as const,
               name: 'Industrial Cyberpunk Theme',
               path: 'amp/ui/DESIGN.md',
               language: 'markdown',
@@ -73,7 +73,7 @@ export const useAmpData = () => {
             },
             {
               id: '4',
-              type: 'ChangeSet',
+              type: 'symbol' as const,
               name: 'Professional UI Implementation',
               path: 'amp/ui/src/',
               language: 'typescript',
@@ -86,7 +86,7 @@ export const useAmpData = () => {
             },
             {
               id: '5',
-              type: 'Symbol',
+              type: 'symbol' as const,
               name: 'FileExplorer',
               path: 'amp/ui/src/components/FileExplorer.tsx',
               language: 'typescript',
@@ -99,7 +99,7 @@ export const useAmpData = () => {
             },
             {
               id: '6',
-              type: 'Symbol',
+              type: 'symbol' as const,
               name: 'Analytics',
               path: 'amp/ui/src/components/Analytics.tsx',
               language: 'typescript',

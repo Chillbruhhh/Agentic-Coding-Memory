@@ -358,6 +358,7 @@ fn pad_line(line: &str, width: usize) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn center_line(line: &str, width: usize) -> String {
     if line.len() >= width {
         return line.to_string();
@@ -510,6 +511,7 @@ fn solidify_line(line: &str) -> String {
         .collect()
 }
 
+#[allow(dead_code)]
 fn gradient_chars() -> Vec<char> {
     vec!['.', ':', '-', '=', '+', '*', '#', '%', '@', '█']
 }

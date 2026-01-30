@@ -55,3 +55,50 @@ pub async fn update_settings(
         }
     }
 }
+
+pub async fn nuclear_delete(State(state): State<AppState>) -> impl IntoResponse {
+    tracing::warn!("NUCLEAR DELETE initiated - deleting ALL data from AMP");
+
+    // Execute nuclear delete queries
+    let queries = vec![
+        "DELETE FROM objects;",
+        "DELETE FROM relationships;",
+        "DELETE FROM defined_in WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);",
+        "DELETE FROM depends_on WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);",
+        "DELETE FROM calls WHERE in NOT IN (SELECT id FROM objects) OR out NOT IN (SELECT id FROM objects);",
+    ];
+
+    let mut deleted_counts = Vec::new();
+
+    for query in queries {
+        match state.db.client.query(query).await {
+            Ok(_) => {
+                tracing::info!("Executed: {}", query);
+                deleted_counts.push(query.to_string());
+            }
+            Err(e) => {
+                tracing::error!("Failed to execute {}: {}", query, e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
+                        "error": format!("Nuclear delete failed: {}", e),
+                        "query": query
+                    })),
+                )
+                    .into_response();
+            }
+        }
+    }
+
+    tracing::warn!("NUCLEAR DELETE completed - all data removed");
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "success": true,
+            "message": "All data deleted successfully",
+            "queries_executed": deleted_counts.len()
+        })),
+    )
+        .into_response()
+}

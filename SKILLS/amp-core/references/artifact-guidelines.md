@@ -176,20 +176,58 @@ Notes are the **most flexible** artifact type. Use them for anything that doesn'
 
 ### 3. Changesets - Completed Work With Context
 
-**Create when:** You completed meaningful work and the "why" adds value beyond the diff.
+**Changesets are the LEAST common artifact type.** Git already tracks what changed. Changesets only add value when they explain **WHY** something was done in a way that isn't obvious from the code or commit message.
+
+**Create when:** 
+- The reasoning behind the change would help future agents understand the codebase
+- You're capturing architectural context that would be lost otherwise
+- The "why" is significantly more valuable than the "what"
 
 ```json
 {
   "type": "changeset",
   "title": "Implement semantic cache for token-efficient context",
-  "description": "Reduces context from 2000+ to ~600 tokens using cosine similarity dedup.",
+  "description": "Reduces context from 2000+ to ~600 tokens using cosine similarity dedup. Previous approach loaded all items, causing context overflow in long sessions. Cosine threshold of 0.85 chosen after testing showed it eliminates 70% of redundant items without losing semantic coverage.",
   "files_changed": ["src/services/cache.rs", "src/handlers/cache.rs"],
   "diff_summary": "+450 lines. New CacheService with get_pack(), write_items(), gc(). TTL-based expiration, importance scoring.",
   "linked_decisions": ["use-surrealdb-for-memory"]
 }
 ```
 
-**Skip when:** Trivial fix, commit message captures everything, no reasoning to add.
+**Skip when (MOST of the time):**
+- Git commit message captures the change adequately
+- You're just listing which files changed (that's what `git diff` is for)
+- There's no "why" that adds value beyond the code itself
+- The change is routine/trivial (bug fix, typo, formatting)
+
+### Changeset Anti-Pattern: The Changelog Trap
+
+**DON'T do this:**
+```json
+{
+  "type": "changeset",
+  "title": "Updated documentation files",
+  "files_changed": ["docs/api.md", "docs/concepts.md", "README.md"],
+  "diff_summary": "Added RRF section, updated endpoints"
+}
+```
+
+This is just a changelog. Git already tracks this. Future agents don't benefit from knowing "files were changed."
+
+**DO this instead (or skip entirely):**
+```json
+{
+  "type": "note",
+  "title": "RRF is how AMP ranks hybrid query results",
+  "category": "insight",
+  "content": "Hybrid queries combine vector, graph, and temporal results using Reciprocal Rank Fusion (RRF) with k=60. Items appearing in multiple retrieval methods get boosted. This is the core ranking algorithm - document it well.",
+  "tags": ["architecture", "retrieval", "rrf"]
+}
+```
+
+The note captures the **insight** (RRF is the ranking algorithm) rather than the **activity** (I updated some docs).
+
+**Rule of thumb:** If your changeset doesn't explain WHY in a way that helps future agents, don't create it. Use a note for the insight, or skip the artifact entirely.
 
 ---
 
@@ -246,6 +284,33 @@ Creates graph relationships for `amp_trace` discovery.
 
 ## Anti-Patterns
 
+### The Changelog Trap (Most Common Mistake)
+
+**This is the #1 artifact anti-pattern.** Creating changesets that just list which files changed.
+
+**Bad:**
+```json
+{
+  "type": "changeset",
+  "title": "RRF Documentation Added to Docs",
+  "files_changed": ["docs/concepts/hybrid-retrieval.md", "docs/api/overview.md"],
+  "diff_summary": "Created new file, updated references"
+}
+```
+
+This adds zero value. Git already tracks file changes. Future agents don't need to know "an agent updated some docs."
+
+**Good:** Either skip the artifact entirely, or capture the **insight**:
+```json
+{
+  "type": "note",
+  "title": "RRF (k=60) is the ranking algorithm for hybrid queries",
+  "category": "insight",
+  "content": "AMP uses Reciprocal Rank Fusion to combine vector, graph, and temporal results. Formula: RRF(d) = Σ 1/(k + rank(d)). Items in multiple result sets get boosted scores. k=60 is the standard value.",
+  "tags": ["architecture", "retrieval"]
+}
+```
+
 ### Artifact Spam
 **Bad:** One artifact per file touched.
 **Good:** One changeset for the completed feature with all files listed.
@@ -262,6 +327,12 @@ Creates graph relationships for `amp_trace` discovery.
 **Bad:** `"linked_decisions": []` when decisions exist
 **Good:** Connect related artifacts for traceability
 
+### Creating Artifacts for Activity, Not Insight
+**Bad:** "Updated 5 files during refactoring session"
+**Good:** "Extracted AuthService because auth logic was duplicated in 5 controllers"
+
+The test: **Does this capture INSIGHT or just ACTIVITY?** Only insights belong in artifacts.
+
 ---
 
 ## Quick Reference
@@ -275,15 +346,20 @@ Creates graph relationships for `amp_trace` discovery.
 - Discovered something non-obvious
 - Hit a gotcha worth warning about
 - Found a pattern that worked well
+- Learned a user preference or project convention
+- Want to capture rationale or historical context
 
-**Create Changeset when:**
-- Completed meaningful work (not trivial)
-- "Why" adds value beyond the diff
+**Create Changeset when (RARE):**
+- The "WHY" behind the change is valuable and non-obvious
+- Architectural context would be lost without it
+- NOT just to record which files changed
 
 **Skip when:**
+- Just listing files changed (use git)
 - Code is self-explanatory
 - Common knowledge for the technology
 - Already documented elsewhere
+- Capturing activity, not insight
 - Unsure → use cache first
 
 ---

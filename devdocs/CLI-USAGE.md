@@ -2,9 +2,19 @@
 
 ## Installation Options
 
-### Windows Users
+### Recommended: Install via npm
 
-#### Option 1: Install from Source (Recommended)
+```bash
+# Global installation (recommended)
+npm install -g @chillbruhhh/amp-cli
+
+# Verify installation
+amp --help
+```
+
+### Windows Users (Alternative Methods)
+
+#### Option 1: Install from Source
 ```powershell
 # Run the install script
 .\install.ps1
