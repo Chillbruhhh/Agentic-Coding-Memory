@@ -321,6 +321,10 @@ cd amp/server && cargo run --release
 
 # Run UI
 cd amp/ui && npm install && npm run dev
+
+- npm run dev (Vite dev server)
+- npm run preview (serve the built bundle)
+- npm run tauri:build (desktop build via Tauri)
 ```
 
 ---
