@@ -12,7 +12,11 @@ Built for the Dynamous-Kiro Hackathon, this implementation demonstrates AMP's ca
 
 Post-Hackathon Vision: AMP will evolve into the foundational memory layer for all AI agent implementations. Our roadmap includes embeddable libraries (Python, TypeScript, Rust), distributed coordination primitives, and advanced memory techniques that ensure your agents maintain persistent context throughout their entire workflow—not just within a single session, but across the lifetime of your project.
 
-AMP is positioning to become the standard protocol for agent memory, providing the infrastructure that lets agents remember, reason, and collaborate at scale.
+AMP is positioning to become a standard protocol for agent memory, providing the infrastructure that lets agents remember, reason, and collaborate at scale.
+
+## Hackathon Entry Branch
+
+Hackathon Entry Branch: ```hackathon-entry```
 
 ## Quick Start
 
@@ -54,6 +58,11 @@ amp index
 # Query indexed code  
 amp index --init-root  # Only Apply if theres no .git folder present and you want to indexfrom this specific folder
 ```
+
+## VERY IMPORTANT!
+
+Copy the AGENTS.MD content from the SKILLS/ directory and apply it to your AGENTS.MD or CLAUDE.MD 
+
 
 ---
 
