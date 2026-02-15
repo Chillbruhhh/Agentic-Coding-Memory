@@ -5697,3 +5697,42 @@ Match:     CLI-indexed project node ✓
 - Bug Fixes: Floating file nodes, missing project links, path mismatch issues
 - Status: All features complete and functional
 
+---
+
+## Day 15 (2026-02-13)
+
+**Work**: Fix REST cache read/list endpoints + add focus route.
+
+**Problem**:
+- `POST /v1/cache/block/read` returned 405.
+- `GET /v1/cache/block/read` and `GET /v1/cache/block/list` returned 404 "Block not found".
+- `/v1/focus` route was missing (404).
+
+**Root Cause**:
+- `/v1/cache/block/:id` matched the literal paths `read` and `list`, routing to `block_get` with `id="read"` / `id="list"` and returning "Block not found". Non-GET methods returned 405 because only GET was registered for `/:id`.
+
+**Fix**:
+- Added explicit REST routes for:
+  - `GET/POST /v1/cache/block/read`
+  - `GET/POST /v1/cache/block/list`
+  - `POST /v1/focus`
+- Implemented unified cache read handler (server-side) that dispatches to:
+  - block get by `block_id`
+  - list_all via `block_search` wildcard (`query="*"`)
+  - search via `block_search`
+  - default current open block for scope
+- Added `amp/scripts/test-rest-cache-read.ps1` to smoke test the endpoints against a running server.
+
+**Files Modified**:
+- `amp/server/src/main.rs` - Registered new routes for cache read/list and focus.
+- `amp/server/src/handlers/cache.rs` - Implemented unified read/list handlers + helpers.
+- `amp/server/src/handlers/mod.rs` - Exported `focus` handler module.
+- `amp/server/src/handlers/focus.rs` - Implemented REST focus endpoint (list/get/set/complete/end).
+- `amp/scripts/test-rest-cache-read.ps1` - New REST smoke test script.
+- `amp/task.md` - Created task tracker and recorded completion.
+
+**Results**:
+- Cache read/list endpoints now work as REST (no collision with `/:id` route).
+- `/v1/focus` is available for REST clients to manage run focus state.
+
+

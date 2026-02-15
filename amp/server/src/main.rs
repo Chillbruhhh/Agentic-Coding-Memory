@@ -249,8 +249,15 @@ fn api_routes() -> Router<AppState> {
         .route("/cache/block/write", post(handlers::cache::block_write))
         .route("/cache/block/compact", post(handlers::cache::block_compact))
         .route("/cache/block/search", post(handlers::cache::block_search))
+        // Unified cache block read/list endpoints (avoid collision with /cache/block/:id)
+        .route("/cache/block/read", get(handlers::cache::block_read_get))
+        .route("/cache/block/read", post(handlers::cache::block_read_post))
+        .route("/cache/block/list", get(handlers::cache::block_list_get))
+        .route("/cache/block/list", post(handlers::cache::block_list_post))
         .route("/cache/block/current/:scope_id", get(handlers::cache::block_current))
         .route("/cache/block/:id", get(handlers::cache::block_get))
+        // Focus endpoint (REST equivalent for amp_focus MCP tool)
+        .route("/focus", post(handlers::focus::handle_focus))
         // Connection tracking endpoints - real-time agent connection status
         .route(
             "/connections/register",

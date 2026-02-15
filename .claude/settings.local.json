@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__amp__amp_cache_write",
+      "mcp__amp__amp_cache_compact",
+      "mcp__amp__amp_cache_read",
+      "mcp__mcp-portal__SurrealDB_query",
+      "Bash(npx tsc:*)",
+      "mcp__amp__amp_query",
+      "mcp__amp__amp_list",
+      "mcp__amp__amp_file_sync",
+      "mcp__amp__amp_status"
+    ]
+  }
+}

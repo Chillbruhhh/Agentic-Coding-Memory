@@ -504,6 +504,197 @@ pub struct BlockMatch {
     pub created_at: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BlockReadRequest {
+    pub scope_id: String,
+    #[serde(default)]
+    pub list_all: Option<bool>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub include_content: Option<bool>,
+    #[serde(default)]
+    pub include_open: Option<bool>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub block_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BlockReadQuery {
+    pub scope_id: String,
+    #[serde(default)]
+    pub list_all: Option<bool>,
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub include_content: Option<bool>,
+    #[serde(default)]
+    pub include_open: Option<bool>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub block_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BlockReadResponse {
+    pub scope_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block: Option<BlockGetResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matches: Option<Vec<BlockMatch>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocks: Option<Vec<BlockGetResponse>>,
+}
+
+pub async fn block_read_get(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<BlockReadQuery>,
+) -> Result<Json<BlockReadResponse>, (StatusCode, String)> {
+    let request = BlockReadRequest {
+        scope_id: query.scope_id,
+        list_all: query.list_all,
+        query: query.query,
+        include_content: query.include_content,
+        include_open: query.include_open,
+        limit: query.limit,
+        block_id: query.block_id,
+    };
+    block_read_impl(&state, request).await
+}
+
+pub async fn block_read_post(
+    State(state): State<AppState>,
+    Json(request): Json<BlockReadRequest>,
+) -> Result<Json<BlockReadResponse>, (StatusCode, String)> {
+    block_read_impl(&state, request).await
+}
+
+pub async fn block_list_get(
+    State(state): State<AppState>,
+    axum::extract::Query(query): axum::extract::Query<BlockReadQuery>,
+) -> Result<Json<BlockReadResponse>, (StatusCode, String)> {
+    let request = BlockReadRequest {
+        scope_id: query.scope_id,
+        list_all: Some(true),
+        query: None,
+        include_content: query.include_content,
+        include_open: query.include_open,
+        limit: query.limit,
+        block_id: None,
+    };
+    block_read_impl(&state, request).await
+}
+
+pub async fn block_list_post(
+    State(state): State<AppState>,
+    Json(mut request): Json<BlockReadRequest>,
+) -> Result<Json<BlockReadResponse>, (StatusCode, String)> {
+    request.list_all = Some(true);
+    request.query = None;
+    request.block_id = None;
+    block_read_impl(&state, request).await
+}
+
+async fn block_read_impl(
+    state: &AppState,
+    request: BlockReadRequest,
+) -> Result<Json<BlockReadResponse>, (StatusCode, String)> {
+    // Case 1: Get a specific block by ID
+    if let Some(block_id) = request.block_id.as_deref() {
+        let block = get_block_by_id(state, block_id).await?;
+        return Ok(Json(BlockReadResponse {
+            scope_id: request.scope_id,
+            block: Some(block),
+            matches: None,
+            blocks: None,
+        }));
+    }
+
+    // Case 2: list_all=true (newest first, include open by default)
+    if request.list_all.unwrap_or(false) {
+        let limit = request.limit.unwrap_or(5);
+        let include_open = request.include_open.unwrap_or(true);
+        let include_content = request.include_content.unwrap_or(false);
+
+        let search_request = BlockSearchRequest {
+            scope_id: request.scope_id.clone(),
+            query: "*".to_string(),
+            limit,
+            include_open,
+        };
+
+        let Json(search_result) = block_search(State(state.clone()), Json(search_request)).await?;
+
+        if include_content {
+            let mut blocks = Vec::new();
+            for m in &search_result.matches {
+                blocks.push(get_block_by_id(state, &m.block_id).await?);
+            }
+            return Ok(Json(BlockReadResponse {
+                scope_id: request.scope_id,
+                block: None,
+                matches: Some(search_result.matches),
+                blocks: Some(blocks),
+            }));
+        }
+
+        return Ok(Json(BlockReadResponse {
+            scope_id: request.scope_id,
+            block: None,
+            matches: Some(search_result.matches),
+            blocks: None,
+        }));
+    }
+
+    // Case 3: search mode (query provided)
+    if let Some(query) = request.query.clone() {
+        let limit = request.limit.unwrap_or(5);
+        let include_open = request.include_open.unwrap_or(false);
+        let include_content = request.include_content.unwrap_or(false);
+
+        let search_request = BlockSearchRequest {
+            scope_id: request.scope_id.clone(),
+            query,
+            limit,
+            include_open,
+        };
+
+        let Json(search_result) = block_search(State(state.clone()), Json(search_request)).await?;
+
+        if include_content {
+            let mut blocks = Vec::new();
+            for m in &search_result.matches {
+                blocks.push(get_block_by_id(state, &m.block_id).await?);
+            }
+            return Ok(Json(BlockReadResponse {
+                scope_id: request.scope_id,
+                block: None,
+                matches: Some(search_result.matches),
+                blocks: Some(blocks),
+            }));
+        }
+
+        return Ok(Json(BlockReadResponse {
+            scope_id: request.scope_id,
+            block: None,
+            matches: Some(search_result.matches),
+            blocks: None,
+        }));
+    }
+
+    // Case 4: default to current open block for scope
+    let block = get_or_create_open_block(state, &request.scope_id).await?;
+    Ok(Json(BlockReadResponse {
+        scope_id: request.scope_id,
+        block: Some(block),
+        matches: None,
+        blocks: None,
+    }))
+}
+
 /// Search cache blocks by summary
 pub async fn block_search(
     State(state): State<AppState>,
@@ -641,66 +832,7 @@ pub async fn block_current(
     State(state): State<AppState>,
     axum::extract::Path(scope_id): axum::extract::Path<String>,
 ) -> Result<Json<BlockGetResponse>, (StatusCode, String)> {
-    let query = "SELECT <string>id AS id_str, status, summary, items, token_count, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'open' LIMIT 1";
-
-    let mut response = state.db.client
-        .query(query)
-        .bind(("scope_id", scope_id.clone()))
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-    let values = take_json_values(&mut response, 0);
-
-    if let Some(block) = values.first() {
-        Ok(Json(BlockGetResponse {
-            block_id: block.get("id_str").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            status: block.get("status").and_then(|v| v.as_str()).unwrap_or("open").to_string(),
-            summary: block.get("summary").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            items: block.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
-            token_count: block.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-            created_at: block.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-        }))
-    } else {
-        // No open block exists - create a new empty block and return it
-        let seq_query = "SELECT sequence FROM cache_block WHERE scope_id = $scope_id ORDER BY sequence DESC LIMIT 1";
-        let mut seq_response = state.db.client
-            .query(seq_query)
-            .bind(("scope_id", scope_id.clone()))
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        let seq_values = take_json_values(&mut seq_response, 0);
-        let last_seq = seq_values
-            .first()
-            .and_then(|v| v.get("sequence"))
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize;
-
-        let new_seq = last_seq + 1;
-        let uuid = uuid::Uuid::new_v4();
-        let new_id = format!("cache_block:`{}`", uuid);
-        let created_at = chrono::Utc::now().to_rfc3339();
-        let create_query = format!(
-            "CREATE {} SET scope_id = $scope_id, sequence = $seq, status = 'open', items = [], token_count = 0, created_at = time::now()",
-            new_id
-        );
-
-        state.db.client
-            .query(&create_query)
-            .bind(("scope_id", scope_id.clone()))
-            .bind(("seq", new_seq as i32))
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-
-        Ok(Json(BlockGetResponse {
-            block_id: new_id,
-            status: "open".to_string(),
-            summary: None,
-            items: Vec::new(),
-            token_count: 0,
-            created_at,
-        }))
-    }
+    get_or_create_open_block(&state, &scope_id).await.map(Json)
 }
 
 /// Get a specific cache block by ID
@@ -731,6 +863,99 @@ pub async fn block_get(
         }))
     } else {
         Err((StatusCode::NOT_FOUND, "Block not found".to_string()))
+    }
+}
+
+async fn get_block_by_id(state: &AppState, block_id: &str) -> Result<BlockGetResponse, (StatusCode, String)> {
+    // Escape the block ID for SurrealDB
+    let escaped_id = escape_block_id(block_id);
+
+    let query = format!("SELECT <string>id AS id_str, status, summary, items, token_count, <string>created_at AS created_at FROM {}", escaped_id);
+
+    let mut response = state.db.client
+        .query(&query)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let values = take_json_values(&mut response, 0);
+
+    if let Some(block) = values.first() {
+        Ok(BlockGetResponse {
+            block_id: block.get("id_str").and_then(|v| v.as_str()).unwrap_or(block_id).to_string(),
+            status: block.get("status").and_then(|v| v.as_str()).unwrap_or("unknown").to_string(),
+            summary: block.get("summary").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            items: block.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+            token_count: block.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            created_at: block.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        })
+    } else {
+        Err((StatusCode::NOT_FOUND, "Block not found".to_string()))
+    }
+}
+
+async fn get_or_create_open_block(
+    state: &AppState,
+    scope_id: &str,
+) -> Result<BlockGetResponse, (StatusCode, String)> {
+    let query = "SELECT <string>id AS id_str, status, summary, items, token_count, <string>created_at AS created_at FROM cache_block WHERE scope_id = $scope_id AND status = 'open' LIMIT 1";
+
+    let mut response = state.db.client
+        .query(query)
+        .bind(("scope_id", scope_id.to_string()))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let values = take_json_values(&mut response, 0);
+
+    if let Some(block) = values.first() {
+        Ok(BlockGetResponse {
+            block_id: block.get("id_str").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            status: block.get("status").and_then(|v| v.as_str()).unwrap_or("open").to_string(),
+            summary: block.get("summary").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            items: block.get("items").and_then(|v| v.as_array()).cloned().unwrap_or_default(),
+            token_count: block.get("token_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
+            created_at: block.get("created_at").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        })
+    } else {
+        // No open block exists - create a new empty block and return it
+        let seq_query = "SELECT sequence FROM cache_block WHERE scope_id = $scope_id ORDER BY sequence DESC LIMIT 1";
+        let mut seq_response = state.db.client
+            .query(seq_query)
+            .bind(("scope_id", scope_id.to_string()))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let seq_values = take_json_values(&mut seq_response, 0);
+        let last_seq = seq_values
+            .first()
+            .and_then(|v| v.get("sequence"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+
+        let new_seq = last_seq + 1;
+        let uuid = uuid::Uuid::new_v4();
+        let new_id = format!("cache_block:`{}`", uuid);
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let create_query = format!(
+            "CREATE {} SET scope_id = $scope_id, sequence = $seq, status = 'open', items = [], token_count = 0, created_at = time::now()",
+            new_id
+        );
+
+        state.db.client
+            .query(&create_query)
+            .bind(("scope_id", scope_id.to_string()))
+            .bind(("seq", new_seq as i32))
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        Ok(BlockGetResponse {
+            block_id: new_id,
+            status: "open".to_string(),
+            summary: None,
+            items: Vec::new(),
+            token_count: 0,
+            created_at,
+        })
     }
 }
 
