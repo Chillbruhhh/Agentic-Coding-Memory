@@ -403,7 +403,10 @@ pub async fn query(
 }
 
 fn build_query_string(request: &QueryRequest) -> String {
-    let mut base_query = "SELECT VALUE { id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, title: title, kind: kind, path: path, language: language, signature: signature, documentation: documentation, summary: summary, description: description, content: content, tags: tags, linked_files: linked_files, file_path: file_path, files_changed: files_changed, decision: decision, diff_summary: diff_summary, context: context, category: category, created_at: created_at, updated_at: updated_at, provenance: provenance, links: links, embedding: embedding, input_summary: input_summary, status: status, duration_ms: duration_ms, confidence: confidence } FROM objects".to_string();
+    // Use subquery pattern: SELECT VALUE { ... } FROM (SELECT * FROM objects WHERE ... ORDER BY created_at DESC LIMIT N)
+    // SurrealDB 2.4 requires ORDER BY fields to be in the SELECT projection,
+    // so we order in the inner query and project in the outer query.
+    let mut inner_query = "SELECT * FROM objects".to_string();
     let mut conditions = Vec::new();
 
     // Text search
@@ -460,15 +463,19 @@ fn build_query_string(request: &QueryRequest) -> String {
 
     // Combine conditions
     if !conditions.is_empty() {
-        base_query.push_str(" WHERE ");
-        base_query.push_str(&conditions.join(" AND "));
+        inner_query.push_str(" WHERE ");
+        inner_query.push_str(&conditions.join(" AND "));
     }
 
     // Order by newest first, then limit
     let limit = request.limit.unwrap_or(10);
-    base_query.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
+    inner_query.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
 
-    base_query
+    // Wrap in outer projection query
+    format!(
+        "SELECT VALUE {{ id: string::concat(id), type: type, tenant_id: tenant_id, project_id: project_id, name: name, title: title, kind: kind, path: path, language: language, signature: signature, documentation: documentation, summary: summary, description: description, content: content, tags: tags, linked_files: linked_files, file_path: file_path, files_changed: files_changed, decision: decision, diff_summary: diff_summary, context: context, category: category, created_at: created_at, updated_at: updated_at, provenance: provenance, links: links, embedding: embedding, input_summary: input_summary, status: status, duration_ms: duration_ms, confidence: confidence }} FROM ({})",
+        inner_query
+    )
 }
 
 fn build_vector_query_string(request: &QueryRequest, vector: &[f32]) -> String {
