@@ -24,8 +24,18 @@ struct ConnectionState {
     connection_id: Option<String>,
     /// Current run ID (updated when amp_run_start is called)
     run_id: Option<String>,
+    /// Project ID derived from working directory
+    project_id: Option<String>,
     /// Whether we've registered with the server
     registered: bool,
+}
+
+/// Extract project name from a scope_id like "project:myrepo" → Some("myrepo")
+fn extract_project_from_scope(scope_id: &str) -> Option<String> {
+    scope_id
+        .strip_prefix("project:")
+        .map(|id| id.trim().to_string())
+        .filter(|id| !id.is_empty())
 }
 
 #[derive(Clone)]
@@ -369,6 +379,65 @@ impl ServerHandler for AmpMcpHandler {
                         tracing::debug!("Heartbeat failed (non-fatal): {}", e);
                     }
                 });
+            }
+        }
+
+        // === Auto-detect project_id from scope_id in cache/focus calls ===
+        // When the agent first passes scope_id: "project:foo", extract "foo"
+        // and update the run + connection so the UI shows the correct project.
+        {
+            let needs_update = {
+                let state = self.connection_state.read().await;
+                state.project_id.is_none() && state.run_id.is_some()
+            };
+
+            if needs_update {
+                // Extract scope_id from raw arguments
+                let scope_id = params
+                    .arguments
+                    .as_ref()
+                    .and_then(|args| args.get("scope_id"))
+                    .and_then(|v| v.as_str());
+
+                if let Some(project_name) = scope_id.and_then(extract_project_from_scope) {
+                    let mut state = self.connection_state.write().await;
+                    // Double-check under write lock
+                    if state.project_id.is_none() {
+                        state.project_id = Some(project_name.clone());
+                        tracing::info!("Detected project_id from scope: {}", project_name);
+
+                        // Update the run object with project_id
+                        if let Some(run_id) = &state.run_id {
+                            let update_payload = serde_json::json!({
+                                "project_id": project_name
+                            });
+                            let run_id_owned = run_id.clone();
+                            let client_clone = client.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = client_clone.update_object(&run_id_owned, update_payload).await {
+                                    tracing::debug!("Failed to update run project_id (non-fatal): {}", e);
+                                }
+                            });
+                        }
+
+                        // Update the connection with project_id
+                        if let Some(conn_id) = &state.connection_id {
+                            let update_payload = serde_json::json!({
+                                "connection_id": conn_id,
+                                "project_id": project_name,
+                                "run_id": state.run_id,
+                                "ttl_seconds": 600
+                            });
+                            let client_clone = client.clone();
+                            tokio::spawn(async move {
+                                // Heartbeat with project_id propagates it to the connection record
+                                if let Err(e) = client_clone.connection_heartbeat(update_payload).await {
+                                    tracing::debug!("Failed to update connection project_id (non-fatal): {}", e);
+                                }
+                            });
+                        }
+                    }
+                }
             }
         }
 

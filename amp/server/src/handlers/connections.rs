@@ -90,6 +90,8 @@ pub struct HeartbeatRequest {
     pub connection_id: String,
     /// Optional: update run_id if a run was started
     pub run_id: Option<String>,
+    /// Optional: update project_id (detected from agent scope)
+    pub project_id: Option<String>,
     /// Optional: custom TTL extension in seconds
     pub ttl_seconds: Option<i64>,
 }
@@ -224,25 +226,22 @@ pub async fn heartbeat(
 
     tracing::debug!("Heartbeat for connection: {}", request.connection_id);
 
-    // Build update query - optionally update run_id if provided
-    let query = if request.run_id.is_some() {
-        format!(
-            "UPDATE agent_connections SET
-                last_heartbeat = time::now(),
-                expires_at = time::now() + {}s,
-                run_id = $run_id
-             WHERE connection_id = $connection_id",
-            ttl_seconds
-        )
-    } else {
-        format!(
-            "UPDATE agent_connections SET
-                last_heartbeat = time::now(),
-                expires_at = time::now() + {}s
-             WHERE connection_id = $connection_id",
-            ttl_seconds
-        )
-    };
+    // Build SET clauses dynamically based on which fields are provided
+    let mut set_clauses = vec![
+        "last_heartbeat = time::now()".to_string(),
+        format!("expires_at = time::now() + {}s", ttl_seconds),
+    ];
+    if request.run_id.is_some() {
+        set_clauses.push("run_id = $run_id".to_string());
+    }
+    if request.project_id.is_some() {
+        set_clauses.push("project_id = $project_id".to_string());
+    }
+
+    let query = format!(
+        "UPDATE agent_connections SET {} WHERE connection_id = $connection_id",
+        set_clauses.join(", ")
+    );
 
     let result = timeout(
         Duration::from_secs(5),
@@ -251,7 +250,8 @@ pub async fn heartbeat(
             .client
             .query(&query)
             .bind(("connection_id", request.connection_id.clone()))
-            .bind(("run_id", request.run_id)),
+            .bind(("run_id", request.run_id))
+            .bind(("project_id", request.project_id)),
     )
     .await;
 

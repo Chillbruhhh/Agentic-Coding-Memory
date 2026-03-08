@@ -52,6 +52,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
   const [expandedBlocks, setExpandedBlocks] = useState<Set<string>>(new Set());
   const [scopeMode, setScopeMode] = useState<CacheScopeMode>('project');
   const [isInteracting, setIsInteracting] = useState(false);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   // Try different scope patterns to find cache data
@@ -59,7 +60,9 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     if (isInteracting) {
       return;
     }
-    setLoading(true);
+    if (!hasLoaded) {
+      setLoading(true);
+    }
     setError(null);
 
     const scrollTop = scrollRef.current?.scrollTop ?? 0;
@@ -67,12 +70,12 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     const normalizedRunId = runId.replace(/^objects:/, '').replace(/[`⟨⟩]/g, '');
     const sessionScopes = [`run:${normalizedRunId}`, `session:${normalizedRunId}`];
     const primarySessionScope = sessionScopes[0];
-    const projectScope = projectId ? `project:${projectId}` : 'project:amp';
+    const projectScope = projectId ? `project:${projectId}` : null;
     const scopePatterns = scopeMode === 'session'
       ? [primarySessionScope]
       : scopeMode === 'project'
-      ? [projectScope]
-      : [...sessionScopes, projectScope];
+      ? (projectScope ? [projectScope] : [])
+      : [...sessionScopes, ...(projectScope ? [projectScope] : [])];
 
     let foundBlocks: CacheBlock[] = [];
 
@@ -122,7 +125,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     // If no blocks found via search, try to get the current open block
     if (foundBlocks.length === 0 && scopePatterns.length > 0) {
       try {
-        const currentScope = scopeMode === 'session' ? primarySessionScope : projectScope;
+        const currentScope = scopeMode === 'session' ? primarySessionScope : (projectScope || primarySessionScope);
         const currentResponse = await fetch(`http://localhost:8105/v1/cache/block/current/${encodeURIComponent(currentScope)}`);
         if (currentResponse.ok) {
           const current = await currentResponse.json();
@@ -150,7 +153,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            scope_id: scopeMode === 'session' ? scopePatterns[0] : projectScope,
+            scope_id: scopeMode === 'session' ? scopePatterns[0] : (projectScope || scopePatterns[0]),
             token_budget: 2000,
           }),
         });
@@ -168,7 +171,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
 
             foundBlocks = [{
               id: 'pack',
-              scope_id: scopeMode === 'session' ? scopePatterns[0] : projectScope,
+              scope_id: scopeMode === 'session' ? scopePatterns[0] : (projectScope || scopePatterns[0]),
               sequence: 0,
               status: 'open',
               items,
@@ -183,13 +186,16 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     }
 
     setBlocks(foundBlocks);
+    if (!hasLoaded) {
+      setHasLoaded(true);
+    }
     setLoading(false);
     requestAnimationFrame(() => {
       if (scrollRef.current) {
         scrollRef.current.scrollTop = scrollTop;
       }
     });
-  }, [runId, projectId, scopeMode, isInteracting]);
+  }, [runId, projectId, scopeMode, isInteracting, hasLoaded]);
 
   useEffect(() => {
     fetchCacheBlocks();
@@ -197,6 +203,7 @@ export const CachePanel: React.FC<CachePanelProps> = ({ runId, projectId }) => {
     const interval = setInterval(fetchCacheBlocks, 10000);
     return () => clearInterval(interval);
   }, [fetchCacheBlocks]);
+
 
   const toggleBlock = (blockId: string) => {
     setExpandedBlocks(prev => {
