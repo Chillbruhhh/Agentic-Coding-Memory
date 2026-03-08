@@ -464,9 +464,9 @@ fn build_query_string(request: &QueryRequest) -> String {
         base_query.push_str(&conditions.join(" AND "));
     }
 
-    // Limit
+    // Order by newest first, then limit
     let limit = request.limit.unwrap_or(10);
-    base_query.push_str(&format!(" LIMIT {}", limit));
+    base_query.push_str(&format!(" ORDER BY created_at DESC LIMIT {}", limit));
 
     base_query
 }
