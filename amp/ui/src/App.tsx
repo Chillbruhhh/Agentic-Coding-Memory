@@ -13,14 +13,28 @@ type ViewType = 'explorer' | 'graph' | 'artifacts' | 'sessions' | 'analytics' | 
 
 function App() {
   const [activeView, setActiveView] = useState<ViewType>('explorer');
+  const [pendingProjectId, setPendingProjectId] = useState<string | undefined>(undefined);
   const [loading, _setLoading] = useState(false);
+
+  // Switching views via the sidebar clears any pending project filter so the
+  // next graph view opens with "All projects" by default.
+  const handleViewChange = (view: ViewType) => {
+    setPendingProjectId(undefined);
+    setActiveView(view);
+  };
+
+  // Codebase cards can deep-link into the graph with a specific project pre-selected.
+  const handleNavigateToGraph = (projectId?: string) => {
+    setPendingProjectId(projectId);
+    setActiveView('graph');
+  };
 
   const renderContent = () => {
     switch (activeView) {
       case 'explorer':
-        return <FileExplorer onNavigateToGraph={() => setActiveView('graph')} />;
+        return <FileExplorer onNavigateToGraph={handleNavigateToGraph} />;
       case 'graph':
-        return <KnowledgeGraph />;
+        return <KnowledgeGraph initialProjectId={pendingProjectId} />;
       case 'artifacts':
         return <Artifacts />;
       case 'sessions':
@@ -30,7 +44,7 @@ function App() {
       case 'settings':
         return <Settings />;
       default:
-        return <FileExplorer onNavigateToGraph={() => setActiveView('graph')} />;
+        return <FileExplorer onNavigateToGraph={handleNavigateToGraph} />;
     }
   };
 
@@ -46,7 +60,7 @@ function App() {
       }} />
       
       <main className="flex-1 flex overflow-hidden relative z-10">
-        <Sidebar activeView={activeView} onViewChange={setActiveView} />
+        <Sidebar activeView={activeView} onViewChange={handleViewChange} />
         <section className="flex-1 flex flex-col bg-background-dark relative overflow-hidden">
           {renderContent()}
         </section>

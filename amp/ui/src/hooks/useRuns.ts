@@ -96,7 +96,7 @@ export const useRuns = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          limit: 200,
+          limit: 10000,
           filters: {
             type: ['Run', 'run']
           }

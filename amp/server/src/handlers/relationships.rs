@@ -110,7 +110,7 @@ pub async fn get_relationships(
     );
     // Build query based on filters - use SELECT VALUE to avoid enum serialization issues
     // Note: in/out ARE the record IDs directly (e.g., objects:uuid), not objects with .id property
-    let mut query_str = String::from("SELECT VALUE { in: string::concat(in), out: string::concat(out), type: meta::tb(id), created_at: created_at } FROM [");
+    let mut query_str = String::from("SELECT VALUE { id: meta::id(id), in: string::concat(in), out: string::concat(out), type: meta::tb(id), created_at: created_at } FROM [");
 
     if let Some(rel_type) = &query.relation_type {
         query_str.push_str(rel_type);
@@ -183,26 +183,35 @@ pub async fn get_relationships(
 
 pub async fn delete_relationship(
     State(state): State<AppState>,
-    Path((rel_type, id)): Path<(String, Uuid)>,
+    Path((rel_type, id)): Path<(String, String)>,
 ) -> Result<StatusCode, StatusCode> {
-    let result: Result<Result<Option<Value>, _>, _> = timeout(
+    // RELATE-generated edge IDs are SurrealDB random keys (e.g. "0bhuhis3o4yv5j7johtc"),
+    // not UUIDs — accept the id as a String and DELETE via raw query. SurrealDB returns
+    // an empty success when the row was already gone, which is the right behavior for
+    // an idempotent DELETE — return 204 either way and let the caller diff if they care.
+    let query = "DELETE type::thing($table, $id)";
+    let result = timeout(
         Duration::from_secs(5),
-        state.db.client.delete((rel_type.as_str(), id)),
+        state
+            .db
+            .client
+            .query(query)
+            .bind(("table", rel_type.clone()))
+            .bind(("id", id.clone())),
     )
     .await;
 
     match result {
-        Ok(Ok(Some(_))) => {
+        Ok(Ok(_)) => {
             tracing::info!("Deleted relationship: {}:{}", rel_type, id);
             Ok(StatusCode::NO_CONTENT)
         }
-        Ok(Ok(None)) => Err(StatusCode::NOT_FOUND),
         Ok(Err(e)) => {
-            tracing::error!("Failed to delete relationship: {}", e);
+            tracing::error!("Failed to delete relationship {}:{}: {}", rel_type, id, e);
             Err(StatusCode::INTERNAL_SERVER_ERROR)
         }
         Err(_) => {
-            tracing::error!("Timeout deleting relationship");
+            tracing::error!("Timeout deleting relationship {}:{}", rel_type, id);
             Err(StatusCode::GATEWAY_TIMEOUT)
         }
     }

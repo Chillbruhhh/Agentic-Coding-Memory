@@ -158,8 +158,10 @@ export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
   layoutKey
 }) => {
   const fgRef = useRef<any>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const didInitialZoomRef = useRef(false);
   const [mounted, setMounted] = useState(false);
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
   const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
 
   // Check if we have an active filter (not all nodes highlighted)
@@ -174,6 +176,27 @@ export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
     const timer = setTimeout(() => setMounted(true), 100);
     return () => clearTimeout(timer);
   }, []);
+
+  // Track container size so the canvas tracks window/panel resize.
+  // ForceGraph3D doesn't reflow on its own — it captures dimensions on mount.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const initial = el.getBoundingClientRect();
+    setDimensions({ width: initial.width, height: initial.height });
+
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        setDimensions(prev =>
+          prev.width === width && prev.height === height ? prev : { width, height }
+        );
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [mounted]);
 
   // Update graph data only after mounted
   useEffect(() => {
@@ -253,28 +276,42 @@ export const ForceGraph3DComponent: React.FC<ForceGraph3DComponentProps> = ({
   }, [hasActiveFilter, highlightedNodeIds]);
 
   if (!mounted) {
-    return <div className="w-full h-full flex items-center justify-center text-slate-500">Initializing graph...</div>;
+    return (
+      <div ref={containerRef} className="w-full h-full flex items-center justify-center text-slate-500">
+        Initializing graph...
+      </div>
+    );
   }
 
   if (graphData.nodes.length === 0 && data?.nodes?.length === 0) {
-    return <div className="w-full h-full flex items-center justify-center text-slate-500">No nodes to display</div>;
+    return (
+      <div ref={containerRef} className="w-full h-full flex items-center justify-center text-slate-500">
+        No nodes to display
+      </div>
+    );
   }
 
   return (
-    <ForceGraph3D
-      ref={fgRef}
-      graphData={graphData}
-      backgroundColor={graphTheme.backgroundColor}
-      nodeColor={getNodeColorWithHighlight}
-      nodeVal={getNodeVal}
-      linkColor={getLinkColor}
-      onNodeClick={handleNodeClick}
-      onNodeHover={handleNodeHover}
-      onLinkHover={handleLinkHover}
-      cooldownTicks={200}
-      warmupTicks={100}
-      d3AlphaDecay={0.02}
-      d3VelocityDecay={0.3}
-    />
+    <div ref={containerRef} className="w-full h-full">
+      {dimensions.width > 0 && dimensions.height > 0 && (
+        <ForceGraph3D
+          ref={fgRef}
+          graphData={graphData}
+          width={dimensions.width}
+          height={dimensions.height}
+          backgroundColor={graphTheme.backgroundColor}
+          nodeColor={getNodeColorWithHighlight}
+          nodeVal={getNodeVal}
+          linkColor={getLinkColor}
+          onNodeClick={handleNodeClick}
+          onNodeHover={handleNodeHover}
+          onLinkHover={handleLinkHover}
+          cooldownTicks={200}
+          warmupTicks={100}
+          d3AlphaDecay={0.02}
+          d3VelocityDecay={0.3}
+        />
+      )}
+    </div>
   );
 };

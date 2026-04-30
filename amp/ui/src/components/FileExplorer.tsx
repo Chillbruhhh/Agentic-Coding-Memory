@@ -147,7 +147,7 @@ const FileTreeModal: React.FC<FileTreeModalProps> = ({ codebase, onClose }) => {
 };
 
 interface FileExplorerProps {
-  onNavigateToGraph?: () => void;
+  onNavigateToGraph?: (projectId?: string) => void;
 }
 
 export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph }) => {
@@ -260,12 +260,10 @@ export const FileExplorer: React.FC<FileExplorerProps> = ({ onNavigateToGraph })
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (onNavigateToGraph) {
-                        onNavigateToGraph();
-                      }
+                      onNavigateToGraph?.(codebase.id);
                     }}
                     className="p-2 hover:bg-primary/20 rounded text-slate-400 hover:text-primary transition-colors"
-                    title="View Knowledge Graph"
+                    title="View in Knowledge Graph"
                   >
                     <SiGraphql size={20} />
                   </button>

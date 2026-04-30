@@ -742,13 +742,27 @@ async fn find_file_node_id(state: &AppState, raw_path: &str, project_id: Option<
     result
 }
 
-async fn find_directory_node_id(state: &AppState, raw_path: &str) -> Option<String> {
+async fn find_directory_node_id(
+    state: &AppState,
+    raw_path: &str,
+    project_id: Option<&str>,
+) -> Option<String> {
     let normalized = normalize_lookup_path(raw_path);
     let normalized_forward = normalized.replace('\\', "/");
     let raw_forward = raw_path.replace('\\', "/");
     let basename = extract_basename_raw(raw_path);
 
-    let query = r#"
+    // When a project_id is provided, restrict matches to that project. Without this filter,
+    // CONTAINS-basename matching happily returns directories from other codebases (every
+    // project has a `components`/`services`/`scripts` dir), which silently bridges projects
+    // via directory↔file `defined_in` edges. Same root cause as the artifacts bug.
+    let project_clause = if project_id.is_some() {
+        " AND project_id = $project_id"
+    } else {
+        ""
+    };
+
+    let query = format!(r#"
         SELECT VALUE string::concat(id) FROM objects
         WHERE kind = 'directory'
           AND (type = 'Symbol' OR type = 'symbol')
@@ -762,19 +776,22 @@ async fn find_directory_node_id(state: &AppState, raw_path: &str) -> Option<Stri
             string::lowercase(path) CONTAINS $norm OR
             string::lowercase(path) CONTAINS $norm_fwd OR
             string::lowercase(path) CONTAINS string::lowercase($basename)
-          )
+          ){}
         LIMIT 1
-    "#;
+    "#, project_clause);
 
-    let mut response = match state.db.client
-        .query(query)
+    let mut q = state.db.client
+        .query(&query)
         .bind(("raw", raw_path.to_string()))
         .bind(("raw_fwd", raw_forward))
         .bind(("norm", normalized))
         .bind(("norm_fwd", normalized_forward))
-        .bind(("basename", basename))
-        .await
-    {
+        .bind(("basename", basename));
+    if let Some(pid) = project_id {
+        q = q.bind(("project_id", pid.to_string()));
+    }
+
+    let mut response = match q.await {
         Ok(response) => response,
         Err(_) => return None,
     };
@@ -2119,7 +2136,7 @@ pub async fn sync_file(
                 .map(|(_, project_path)| normalize_lookup_path(project_path) == normalize_lookup_path(dir_path))
                 .unwrap_or(false);
             if !skip_dir {
-                let mut dir_node_id = find_directory_node_id(&state, dir_path).await;
+                let mut dir_node_id = find_directory_node_id(&state, dir_path, Some(&project_id)).await;
                 if dir_node_id.is_none() {
                     let dir_name = PathBuf::from(dir_path)
                         .file_name()

@@ -435,13 +435,29 @@ pub async fn write_artifact(
             .replace("âŸ©", "")
     }
 
-    async fn find_or_create_artifact_core(state: &AppState) -> Option<String> {
-        let query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'artifact_core' LIMIT 1".to_string();
-        let name = "Artifact Core".to_string();
+    async fn find_or_create_artifact_core(
+        state: &AppState,
+        project_id: Option<&str>,
+    ) -> Option<String> {
+        // Scope by project_id so each project gets its own hub.
+        // When project_id is None, fall back to the legacy global core (where project_id IS NONE).
+        let (query, name) = match project_id {
+            Some(pid) => (
+                "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'artifact_core' AND project_id = $project_id LIMIT 1".to_string(),
+                format!("Artifact Core ({})", pid),
+            ),
+            None => (
+                "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'artifact_core' AND project_id IS NONE LIMIT 1".to_string(),
+                "Artifact Core".to_string(),
+            ),
+        };
 
-        if let Ok(Ok(mut response)) =
-            timeout(Duration::from_secs(2), state.db.client.query(query)).await
-        {
+        let mut lookup = state.db.client.query(query);
+        if let Some(pid) = project_id {
+            lookup = lookup.bind(("project_id", pid.to_string()));
+        }
+
+        if let Ok(Ok(mut response)) = timeout(Duration::from_secs(2), lookup).await {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             if let Some(core_obj) = results.first() {
                 if let Some(core_id) = core_obj.get("id").and_then(|v| v.as_str()) {
@@ -452,13 +468,18 @@ pub async fn write_artifact(
 
         let core_id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
-        let core_obj = serde_json::json!({
+        let mut core_obj = serde_json::json!({
             "type": "artifact_core",
             "kind": "artifact_core",
             "name": name,
             "created_at": now,
             "updated_at": now
         });
+        if let Some(pid) = project_id {
+            if let Some(map) = core_obj.as_object_mut() {
+                map.insert("project_id".to_string(), Value::String(pid.to_string()));
+            }
+        }
         let query = format!("CREATE objects:`{}` CONTENT $data", core_id);
         match timeout(
             Duration::from_secs(3),
@@ -471,8 +492,14 @@ pub async fn write_artifact(
         }
     }
 
-    // Helper to find a file node by exact path (prefer file symbols, fallback to FileLog)
-    async fn find_file_node_id(state: &AppState, file_path: &str) -> Option<String> {
+    // Helper to find a file node by exact path (prefer file symbols, fallback to FileLog).
+    // When project_id is Some, the search is restricted to that project — this prevents
+    // fuzzy basename matches from creating phantom edges across codebases.
+    async fn find_file_node_id(
+        state: &AppState,
+        file_path: &str,
+        project_id: Option<&str>,
+    ) -> Option<String> {
         let trimmed = file_path.trim().to_string();
         if trimmed.is_empty() {
             return None;
@@ -486,22 +513,33 @@ pub async fn write_artifact(
             .unwrap_or(&trimmed)
             .to_string();
 
-        tracing::info!("find_file_node_id: looking for '{}' (norm='{}', basename='{}')", trimmed, normalized, basename);
+        tracing::info!(
+            "find_file_node_id: looking for '{}' (norm='{}', basename='{}', project={:?})",
+            trimmed, normalized, basename, project_id
+        );
+
+        let project_filter = if project_id.is_some() {
+            " AND project_id = $project_id"
+        } else {
+            ""
+        };
 
         // Try file nodes first so graph links attach to file nodes.
         // Use string::concat(id) to convert SurrealDB Thing to JSON-serializable string.
         // Match both 'file' (legacy) and 'Symbol' (new standard) types for backward compatibility
-        let symbol_query = "SELECT VALUE { id: string::concat(id), file_id: file_id } FROM objects WHERE (kind = 'file' AND (type = 'Symbol' OR type = 'symbol' OR type = 'file' OR type = 'File')) AND ((path = $path OR path CONTAINS $path OR path CONTAINS $norm OR path CONTAINS $basename) OR (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename)) LIMIT 1";
-        if let Ok(Ok(mut response)) = timeout(
-            Duration::from_secs(2),
-            state.db.client
-                .query(symbol_query)
-                .bind(("path", trimmed.clone()))
-                .bind(("norm", normalized.clone()))
-                .bind(("basename", basename.clone())),
-        )
-        .await
-        {
+        let symbol_query = format!(
+            "SELECT VALUE {{ id: string::concat(id), file_id: file_id }} FROM objects WHERE (kind = 'file' AND (type = 'Symbol' OR type = 'symbol' OR type = 'file' OR type = 'File')) AND ((path = $path OR path CONTAINS $path OR path CONTAINS $norm OR path CONTAINS $basename) OR (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename)){} LIMIT 1",
+            project_filter
+        );
+        let mut symbol_q = state.db.client
+            .query(&symbol_query)
+            .bind(("path", trimmed.clone()))
+            .bind(("norm", normalized.clone()))
+            .bind(("basename", basename.clone()));
+        if let Some(pid) = project_id {
+            symbol_q = symbol_q.bind(("project_id", pid.to_string()));
+        }
+        if let Ok(Ok(mut response)) = timeout(Duration::from_secs(2), symbol_q).await {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             tracing::info!("find_file_node_id: file symbol query returned {} results: {:?}", results.len(), results);
             if let Some(file_obj) = results.first() {
@@ -515,17 +553,19 @@ pub async fn write_artifact(
         }
 
         // Fallback: try FileLog with CONTAINS matching (handles relative paths)
-        let filelog_query = "SELECT VALUE { id: string::concat(id) } FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename) LIMIT 1";
-        if let Ok(Ok(mut response)) = timeout(
-            Duration::from_secs(2),
-            state.db.client
-                .query(filelog_query)
-                .bind(("path", trimmed))
-                .bind(("norm", normalized))
-                .bind(("basename", basename)),
-        )
-        .await
-        {
+        let filelog_query = format!(
+            "SELECT VALUE {{ id: string::concat(id) }} FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path CONTAINS $norm OR file_path CONTAINS $basename){} LIMIT 1",
+            project_filter
+        );
+        let mut filelog_q = state.db.client
+            .query(&filelog_query)
+            .bind(("path", trimmed))
+            .bind(("norm", normalized))
+            .bind(("basename", basename));
+        if let Some(pid) = project_id {
+            filelog_q = filelog_q.bind(("project_id", pid.to_string()));
+        }
+        if let Ok(Ok(mut response)) = timeout(Duration::from_secs(2), filelog_q).await {
             let results: Vec<Value> = crate::surreal_json::take_json_values(&mut response, 0);
             if let Some(file_obj) = results.first() {
                 if let Some(file_id) = file_obj.get("id").and_then(|v| v.as_str()) {
@@ -588,6 +628,7 @@ pub async fn write_artifact(
     }
 
     let mut linked_to_file = false;
+    let project_scope = request.project_id.as_deref();
 
     // Link files (for decisions/notes that modify or reference files)
     if let Some(linked_files) = &request.linked_files {
@@ -595,7 +636,7 @@ pub async fn write_artifact(
             let mut target_id = None;
             if Uuid::parse_str(file_ref).is_ok() {
                 target_id = Some(file_ref.clone());
-            } else if let Some(file_id) = find_file_node_id(&state, file_ref).await {
+            } else if let Some(file_id) = find_file_node_id(&state, file_ref, project_scope).await {
                 target_id = Some(file_id);
             }
 
@@ -617,7 +658,7 @@ pub async fn write_artifact(
         .unwrap_or(false);
     if !has_linked_files {
         if let Some(file_path) = &request.file_path {
-            if let Some(file_id) = find_file_node_id(&state, file_path).await {
+            if let Some(file_id) = find_file_node_id(&state, file_path, project_scope).await {
                 if create_relationship(&state, &object_id, "modifies", &file_id).await {
                     relationships_created += 1;
                     linked_to_file = true;
@@ -629,7 +670,7 @@ pub async fn write_artifact(
     // For FileLog artifacts, link to the file itself
     if matches!(request.artifact_type, ArtifactType::FileLog) {
         if let Some(file_path) = &request.file_path {
-            if let Some(file_id) = find_file_node_id(&state, file_path).await {
+            if let Some(file_id) = find_file_node_id(&state, file_path, project_scope).await {
                 if create_relationship(&state, &object_id, "defined_in", &file_id).await {
                     relationships_created += 1;
                     linked_to_file = true;
@@ -638,9 +679,10 @@ pub async fn write_artifact(
         }
     }
 
-    // Link to a single global artifact core only when not tied to a file.
+    // Link to a per-project artifact core only when not tied to a file.
+    // Each project gets its own hub so artifacts don't bridge across codebases.
     if !linked_to_file {
-        if let Some(core_id) = find_or_create_artifact_core(&state).await {
+        if let Some(core_id) = find_or_create_artifact_core(&state, project_scope).await {
             if create_relationship(&state, &object_id, "defined_in", &core_id).await {
                 relationships_created += 1;
             }

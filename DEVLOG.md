@@ -5736,3 +5736,126 @@ Match:     CLI-indexed project node ✓
 - `/v1/focus` is available for REST clients to manage run focus state.
 
 
+## Day 16 (2026-04-30)
+
+**Work**: Fix cross-codebase relationship bleed in the knowledge graph + a stack of UI/server bugs uncovered along the way.
+
+### 1. Cross-codebase artifact bridging
+
+**Problem**:
+- "All projects" view of the knowledge graph showed every codebase visually stitched together.
+- Agents writing notes/decisions/changesets in project A were creating `modifies` edges to files in project B, and unlinked artifacts across all projects were collapsing into a single global hub node.
+
+**Root Cause**:
+- `find_file_node_id` in `amp/server/src/handlers/artifacts.rs` did fuzzy `path CONTAINS $basename ... LIMIT 1` lookups with no `project_id` filter, so common filenames (`config.py`, `auth.py`, `index.ts`) matched files in unrelated projects.
+- `find_or_create_artifact_core` was a single global singleton; every artifact without a file link attached via `defined_in` to one shared `artifact_core` node, bridging every project through it.
+
+**Fix**:
+- Threaded `project_id: Option<&str>` through `find_file_node_id` and appended `AND project_id = $project_id` to both the symbol-table query and the FileLog fallback.
+- Made `find_or_create_artifact_core` per-project: each `project_id` now resolves to its own hub named `Artifact Core ({project_id})`. Artifacts with no `project_id` still fall back to the legacy global core (`project_id IS NONE`) for backward compatibility.
+- Updated all four call sites in `write_artifact` to pass `request.project_id.as_deref()`.
+
+### 2. Indexer's directory lookup had the same bug
+
+**Problem**:
+- After cleanup, diagnostic still found 243 cross-project edges of the form `directory -[defined_in]-> file` linking a directory in one project to a file in another (`components` dir from `amptest` to a TSX file in `my-clawdbot`, etc.).
+
+**Root Cause**:
+- `find_directory_node_id` in `amp/server/src/handlers/codebase.rs` used the same basename-CONTAINS pattern with no project scope. When indexing a file under `components/`, the lookup happily matched a `components/` directory from any other indexed codebase and created a cross-project `defined_in` edge.
+
+**Fix**:
+- Added `project_id: Option<&str>` parameter to `find_directory_node_id`; appends `AND project_id = $project_id` when supplied.
+- Updated the file-indexing call site to pass the file's project_id, ensuring directory-to-file links never leave the project boundary.
+
+### 3. Knowledge graph didn't resize with the window
+
+**Problem**:
+- Resizing the desktop app window left the 3D canvas at its initial dimensions; the rest of the layout reflowed but the graph stayed pinned.
+
+**Root Cause**:
+- `<ForceGraph3D>` was rendered with no `width`/`height` props in `amp/ui/src/components/ForceGraph3DComponent.tsx`. The library captures `window.innerWidth/Height` once on mount and never reacts to container resize.
+
+**Fix**:
+- Wrapped the canvas in a `<div ref={containerRef}>` and added a `ResizeObserver` that pushes container dimensions into local state, passed as explicit `width`/`height` props.
+- Initial size read via `getBoundingClientRect()` on mount so first paint isn't blank.
+
+### 4. UI scoping by project
+
+**Problem**:
+- `useCodebases` fetched `/v1/query` and `/v1/relationships` with no project filter, so even after server-side fixes the UI rendered every project as one combined graph.
+
+**Fix**:
+- Exposed a derived `projects` list from already-fetched objects (filter `kind === 'project'`); no new endpoint needed.
+- Added a "Project" `<select>` dropdown in `GraphControls` (alongside search and symbol-type filters) with "All projects" as default.
+- `KnowledgeGraph` now accepts an `initialProjectId` prop, scopes objects/relationships by `project_id` when not "all", and re-triggers force layout on project change.
+- Codebase cards in `FileExplorer` pass `codebase.id` to `onNavigateToGraph` so clicking the GraphQL icon opens the graph filtered to that project. Sidebar navigation clears the pending project filter.
+
+### 5. Relationship DELETE handler rejected SurrealDB edge IDs
+
+**Problem**:
+- The first cleanup script run reported `Failed: 243` with HTTP 400, then 404, on every DELETE.
+
+**Root Cause**:
+- `delete_relationship` declared `Path<(String, Uuid)>`. RELATE-generated edge IDs are SurrealDB random keys (e.g. `0bhuhis3o4yv5j7johtc`), not UUIDs — Axum's `Uuid` extractor rejected them with 400 before the handler ran. After switching to `Path<(String, String)>` with a `RETURN BEFORE` query, the deletes succeeded but the existence check based on response payload misread the result and returned 404 even on success.
+
+**Fix**:
+- Accept `id: String`. Use `DELETE type::thing($table, $id)` (idempotent — silent no-op on missing rows) and always return 204. Matches the original handler's contract; no false 404s.
+
+### 6. Sessions tab capped at 200
+
+**Problem**:
+- "HISTORY 199" (with 1 LIVE) — couldn't see older sessions.
+
+**Root Cause**:
+- `useRuns` hardcoded `limit: 200` in the `/v1/query` body.
+
+**Fix**:
+- Bumped to `10000` to match `useCodebases`. Server already orders newest-first per the Day 15 ORDER BY fix, so the UI just needed to ask for more.
+- Note: this hook polls every 5s, so high session counts will eventually need cursor pagination.
+
+### 7. Diagnostics + cleanup scripts
+
+Added three PowerShell scripts under `amp/scripts/`:
+
+- `diagnose-graph-edges.ps1` — read-only. Bulk-fetches every object once, classifies every edge as `same-project`, `cross-project`, `one-empty`, `both-empty`, or `missing-endpoint`. Drills into suspect buckets by endpoint kind pair and lists top "orphan" hub nodes.
+- `cleanup-cross-project-edges.ps1` — deletes edges where both endpoints have non-empty differing `project_id`s. Dry-run by default; `-Confirm` to actually delete.
+- `cleanup-legacy-artifact-core.ps1` — finds legacy global `artifact_core` nodes (those with no `project_id`), deletes the `defined_in` edges hanging off them, and then removes the hub nodes themselves.
+
+All three switched from per-edge `GET /v1/objects/{id}` to a single bulk `POST /v1/query` with a normalized `objects:⟨uuid⟩` → bare-UUID id map. Earlier per-edge regex stripping was also broken in PowerShell (Unicode escape syntax mismatch), which the bulk approach sidesteps.
+
+**Cleanup outcome on dev DB**:
+- Total edges: 4103 → 3829 (deleted 274).
+- `cross-project`: 243 → 0.
+- `both-empty`: 19 → 0.
+- `one-empty`: 95 → 83 (12 hub edges removed).
+
+### 8. Edge id exposed on relationships response
+
+**Problem**:
+- Cleanup scripts needed each edge's id to call DELETE, but `GET /v1/relationships` only returned `in`, `out`, `type`, `created_at`.
+
+**Fix**:
+- Added `id: meta::id(id)` to the `SELECT VALUE` in `get_relationships` — additive, doesn't break existing consumers (only the UI's `useCodebases`, which doesn't use the field).
+
+**Files Modified**:
+- `amp/server/src/handlers/artifacts.rs` — `find_file_node_id` takes `project_id`; `find_or_create_artifact_core` is per-project.
+- `amp/server/src/handlers/codebase.rs` — `find_directory_node_id` takes `project_id`; indexer call site passes it.
+- `amp/server/src/handlers/relationships.rs` — DELETE handler accepts string ids; GET returns `id`.
+- `amp/ui/src/components/ForceGraph3DComponent.tsx` — `ResizeObserver` + `width`/`height` props.
+- `amp/ui/src/components/GraphControls.tsx` — project dropdown.
+- `amp/ui/src/components/KnowledgeGraph.tsx` — `initialProjectId` prop, project-scoped graph data.
+- `amp/ui/src/components/FileExplorer.tsx` — codebase card deep-links to graph with project id.
+- `amp/ui/src/App.tsx` — pending-project state plumbing between explorer and graph.
+- `amp/ui/src/hooks/useCodebases.ts` — derives `projects` list; exports `ProjectOption`.
+- `amp/ui/src/hooks/useRuns.ts` — sessions limit 200 → 10000.
+- `amp/scripts/diagnose-graph-edges.ps1` — new.
+- `amp/scripts/cleanup-cross-project-edges.ps1` — new.
+- `amp/scripts/cleanup-legacy-artifact-core.ps1` — new.
+
+**Results**:
+- "All projects" view of the knowledge graph now shows distinct codebase clusters with no edges between them.
+- Re-indexing a codebase no longer re-creates cross-project directory↔file edges.
+- Window resize, project filter, deep-link from codebase cards, and full session history all working.
+- New artifact writes are correctly scoped per-project from creation; legacy global hub data cleaned up.
+
+

@@ -1,4 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
+
+export interface ProjectOption {
+  id: string;
+  name: string;
+}
 
 export interface CodebaseProject {
   id: string;
@@ -408,10 +413,29 @@ const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
     fetchCodebases();
   };
 
+  // Derive distinct projects from the already-fetched objects.
+  // Prefers project-kind nodes for naming, but falls back to any project_id seen on other objects
+  // so codebases without a project node still show up in the dropdown.
+  const projects: ProjectOption[] = useMemo(() => {
+    const byId = new Map<string, ProjectOption>();
+    objects.forEach((obj: any) => {
+      const pid = obj?.project_id;
+      if (!pid) return;
+      const isProjectNode = (obj.kind || '').toLowerCase() === 'project';
+      if (isProjectNode) {
+        byId.set(pid, { id: pid, name: obj.name || pid });
+      } else if (!byId.has(pid)) {
+        byId.set(pid, { id: pid, name: pid });
+      }
+    });
+    return Array.from(byId.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [objects]);
+
   return {
     codebases,
     objects,
     relationships,
+    projects,
     loading,
     error,
     refetch

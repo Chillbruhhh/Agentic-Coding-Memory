@@ -7,11 +7,16 @@ import { GraphControls } from './GraphControls';
 import { GraphLegend } from './GraphLegend';
 import { transformAmpToGraph, GraphNode, GraphLink } from '../utils/graphDataAdapter';
 
-export const KnowledgeGraph: React.FC = () => {
-  const { objects, relationships, loading, error } = useCodebases();
+interface KnowledgeGraphProps {
+  initialProjectId?: string;
+}
+
+export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ initialProjectId }) => {
+  const { objects, relationships, projects, loading, error } = useCodebases();
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [_hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(initialProjectId ?? 'all');
   const [visibleTypes, setVisibleTypes] = useState<string[]>([
     'function',
     'class',
@@ -39,15 +44,28 @@ export const KnowledgeGraph: React.FC = () => {
       .replace(/[`]/g, '')
       .replace(/[\u27E8\u27E9]/g, '');
 
-  // Transform codebase data to graph format
+  // Transform codebase data to graph format.
+  // When a project is selected, restrict objects to that project_id and drop edges
+  // that touch anything outside the project — this is the UI-side guard against
+  // cross-codebase bleed-through.
   const graphData = useMemo(() => {
     if (!objects || objects.length === 0) {
       return { nodes: [], links: [] };
     }
 
-    // Use the actual AMP objects directly
-    return transformAmpToGraph(objects, relationships);
-  }, [objects, relationships]);
+    if (selectedProjectId === 'all') {
+      return transformAmpToGraph(objects, relationships);
+    }
+
+    const scopedObjects = objects.filter((obj: any) => obj?.project_id === selectedProjectId);
+    const scopedIds = new Set(
+      scopedObjects.map((obj: any) => obj?.id ? normalizeId(obj.id) : '').filter(Boolean)
+    );
+    const scopedRelationships = relationships.filter(
+      (rel: any) => scopedIds.has(rel.in) && scopedIds.has(rel.out)
+    );
+    return transformAmpToGraph(scopedObjects, scopedRelationships);
+  }, [objects, relationships, selectedProjectId]);
 
   const objectById = useMemo(() => {
     const map = new Map<string, any>();
@@ -126,7 +144,7 @@ export const KnowledgeGraph: React.FC = () => {
   // This keeps the graph stable during search
   useEffect(() => {
     setLayoutKey(prev => prev + 1);
-  }, [visibleTypes.join('|')]);
+  }, [visibleTypes.join('|'), selectedProjectId]);
 
   useEffect(() => {
     if (!selectedNode || !['file', 'directory', 'project'].includes(selectedNode.kind)) {
@@ -243,6 +261,9 @@ export const KnowledgeGraph: React.FC = () => {
           onSearch={handleSearch}
           onFilterChange={handleFilterChange}
           onResetCamera={handleResetCamera}
+          projects={projects}
+          selectedProjectId={selectedProjectId}
+          onProjectChange={setSelectedProjectId}
         />
         <GraphLegend nodes={graphData.nodes} />
       </div>

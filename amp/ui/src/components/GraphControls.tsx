@@ -1,11 +1,15 @@
 import React, { useState } from 'react';
 import { HiSearch, HiAdjustments, HiEye, HiEyeOff } from 'react-icons/hi';
 import { controlPanelTheme } from '../utils/graphTheme';
+import { ProjectOption } from '../hooks/useCodebases';
 
 interface GraphControlsProps {
   onSearch: (query: string) => void;
   onFilterChange: (filters: string[]) => void;
   onResetCamera: () => void;
+  projects?: ProjectOption[];
+  selectedProjectId?: string;
+  onProjectChange?: (projectId: string) => void;
 }
 
 const symbolTypes = ['function', 'class', 'method', 'variable', 'interface'];
@@ -13,7 +17,10 @@ const symbolTypes = ['function', 'class', 'method', 'variable', 'interface'];
 export const GraphControls: React.FC<GraphControlsProps> = ({
   onSearch,
   onFilterChange,
-  onResetCamera
+  onResetCamera,
+  projects = [],
+  selectedProjectId = 'all',
+  onProjectChange
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [visibleTypes, setVisibleTypes] = useState<string[]>(symbolTypes);
@@ -65,6 +72,25 @@ export const GraphControls: React.FC<GraphControlsProps> = ({
           className={`w-full pl-8 pr-3 py-1.5 rounded text-xs ${controlPanelTheme.input} transition-colors`}
         />
       </div>
+
+      {/* Project selector */}
+      {projects.length > 0 && onProjectChange && (
+        <div>
+          <label className="text-xs text-slate-400 uppercase tracking-wider mb-1 block">
+            Project
+          </label>
+          <select
+            value={selectedProjectId}
+            onChange={(e) => onProjectChange(e.target.value)}
+            className={`w-full px-2 py-1.5 rounded text-xs ${controlPanelTheme.input} transition-colors`}
+          >
+            <option value="all">All projects</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Expanded controls */}
       {isExpanded && (
