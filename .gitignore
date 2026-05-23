@@ -42,3 +42,6 @@ amp/logs/
 
 # Collected texts
 collected-texts/
+
+# Claude Code worktrees (isolated checkouts — never commit)
+.claude/worktrees/

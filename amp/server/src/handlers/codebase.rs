@@ -344,11 +344,21 @@ pub async fn get_file_log(
     Ok(Json(FileLogResponse { file_log, markdown }))
 }
 
-/// Get stored AI file log object by path
+#[derive(Debug, Deserialize)]
+pub struct FileLogQuery {
+    pub project_id: Option<String>,
+}
+
+/// Get stored AI file log object by path. Optional `?project_id=` narrows the
+/// lookup to a single codebase — without it, basename matches like "App.tsx"
+/// can collide across projects.
 pub async fn get_file_log_object(
     State(state): State<AppState>,
     Path(file_path): Path<String>,
+    Query(query): Query<FileLogQuery>,
 ) -> Result<Json<FileLogObjectResponse>, (StatusCode, Json<serde_json::Value>)> {
+    let project_filter = query.project_id.as_deref().unwrap_or("");
+    let has_project = !project_filter.is_empty();
     if let Some(object_id) = parse_object_id(&file_path) {
         let mut response = match state
             .db
@@ -417,7 +427,9 @@ pub async fn get_file_log_object(
     // Check if input is basename-only (no path separators) - needs early ambiguity check
     let is_basename_only = !file_path.contains('/') && !file_path.contains('\\');
 
-    if is_basename_only {
+    // Skip the cross-project ambiguity guard when the caller explicitly scoped
+    // by project — the project_id filter at the end disambiguates the match.
+    if is_basename_only && !has_project {
         // Query all matching file_paths - HashSet will deduplicate
         let ambiguity_query = "SELECT VALUE file_path FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename";
         if let Ok(mut response) = state.db.client
@@ -446,17 +458,21 @@ pub async fn get_file_log_object(
         }
     }
 
-    // Tier 1: Try specific path matches first (exact, contains path/norm)
-    // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
-    let specific_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM (SELECT * FROM objects WHERE type = 'FileLog' AND (file_path = $path OR file_path CONTAINS $path OR file_path = $norm OR file_path CONTAINS $norm) ORDER BY updated_at DESC LIMIT 1)";
-    let mut values = match state
-        .db
-        .client
-        .query(specific_query)
-        .bind(("path", file_path.clone()))
-        .bind(("norm", normalized.clone()))
-        .await
-    {
+    let project_clause = if has_project { " AND project_id = $project_id" } else { "" };
+
+    // Tier 1: Try specific path matches first (exact, contains path/norm).
+    // We lowercase both sides because stored file_paths preserve OS casing
+    // (e.g. `LandingPage.tsx`) while the inputs come in already normalized to
+    // lowercase via normalize_lookup_path / extract_basename. Without the
+    // case-fold, files with mixed-case names never match.
+    let specific_query = format!("SELECT VALUE {{ id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id }} FROM (SELECT * FROM objects WHERE type = 'FileLog' AND (string::lowercase(file_path) = $path OR string::lowercase(file_path) CONTAINS $path OR string::lowercase(file_path) = $norm OR string::lowercase(file_path) CONTAINS $norm){} ORDER BY updated_at DESC LIMIT 1)", project_clause);
+    let mut q1 = state.db.client.query(specific_query.as_str())
+        .bind(("path", file_path.to_lowercase()))
+        .bind(("norm", normalized.clone()));
+    if has_project {
+        q1 = q1.bind(("project_id", project_filter.to_string()));
+    }
+    let mut values = match q1.await {
         Ok(mut response) => take_json_values(&mut response, 0),
         Err(err) => {
             tracing::warn!("File log query failed, falling back to scan: {}", err);
@@ -467,21 +483,24 @@ pub async fn get_file_log_object(
     // Tier 2: If no specific match, try basename with ambiguity check
     // Use SELECT VALUE with string::concat(id) to avoid Thing enum serialization errors
     if values.is_empty() {
-        let basename_query = "SELECT VALUE { id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id } FROM (SELECT * FROM objects WHERE type = 'FileLog' AND file_path CONTAINS $basename ORDER BY updated_at DESC)";
+        let basename_query = format!("SELECT VALUE {{ id: string::concat(id), type: type, file_path: file_path, file_id: file_id, summary: summary, summary_markdown: summary_markdown, purpose: purpose, key_symbols: key_symbols, dependencies: dependencies, notes: notes, updated_at: updated_at, created_at: created_at, project_id: project_id, tenant_id: tenant_id }} FROM (SELECT * FROM objects WHERE type = 'FileLog' AND string::lowercase(file_path) CONTAINS $basename{} ORDER BY updated_at DESC)", project_clause);
 
-        if let Ok(mut response) = state.db.client
-            .query(basename_query)
-            .bind(("basename", basename.clone()))
-            .await
+        let mut q2 = state.db.client.query(basename_query.as_str())
+            .bind(("basename", basename.clone()));
+        if has_project {
+            q2 = q2.bind(("project_id", project_filter.to_string()));
+        }
+        if let Ok(mut response) = q2.await
         {
             let basename_values = take_json_values(&mut response, 0);
 
-            // Check for ambiguity - multiple different file paths
+            // Check for ambiguity - multiple different file paths (skip when
+            // the caller already scoped by project_id).
             let unique_paths: std::collections::HashSet<String> = basename_values.iter()
                 .filter_map(|v| v.get("file_path").and_then(|p| p.as_str()).map(|s| s.to_string()))
                 .collect();
 
-            if unique_paths.len() > 1 {
+            if unique_paths.len() > 1 && !has_project {
                 let paths_list: Vec<String> = unique_paths.into_iter().collect();
                 return Err((
                     StatusCode::CONFLICT,
@@ -572,6 +591,26 @@ pub async fn get_file_log_object(
     }
 
     normalize_object_ids(&mut values);
+
+    if has_project {
+        values.retain(|v| {
+            v.get("project_id")
+                .and_then(|p| p.as_str())
+                .map(|p| p == project_filter)
+                .unwrap_or(false)
+        });
+        if values.is_empty() {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({
+                    "error": "File log not found for project",
+                    "path": file_path,
+                    "project_id": project_filter,
+                })),
+            ));
+        }
+    }
+
     values.sort_by(|a, b| {
         let proj_a = a.get("project_id")
             .and_then(|v| v.as_str())
@@ -1173,12 +1212,30 @@ pub struct FileContentQuery {
     pub max_chars: Option<usize>,
 }
 
-/// Get stored file content by path (assembled from FileChunk objects)
+/// Get stored file content by path. Tries disk first (preserves original
+/// formatting & newlines) and falls back to assembled FileChunk objects.
 pub async fn get_file_content(
     State(state): State<AppState>,
     Path(file_path): Path<String>,
     Query(query): Query<FileContentQuery>,
 ) -> Result<Json<FileContentResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Strategy 0: read from disk if we can resolve the path. This gives us the
+    // original source with its real line breaks instead of FileChunk text that
+    // may have been re-flowed during indexing.
+    if let Ok(resolved) = resolve_file_path(&file_path, &state).await {
+        if let Ok(content) = tokio::fs::read_to_string(&resolved).await {
+            let limited: String = match query.max_chars {
+                Some(limit) => content.chars().take(limit).collect(),
+                None => content.clone(),
+            };
+            return Ok(Json(FileContentResponse {
+                path: file_path,
+                content: limited,
+                chunks: vec![content],
+            }));
+        }
+    }
+
     let normalized = normalize_file_content_path(&file_path);
     let basename = extract_basename_raw(&file_path);
     let basename_lower = basename.to_lowercase();

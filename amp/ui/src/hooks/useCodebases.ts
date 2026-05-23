@@ -25,6 +25,7 @@ export interface FileNode {
   modified?: string;
   children?: FileNode[];
   language?: string;
+  project_id?: string;
   symbols?: Array<{
     name: string;
     type: string;
@@ -44,13 +45,17 @@ export const useCodebases = () => {
     const pathMap: Record<string, FileNode> = {};
     const rootNodes: FileNode[] = [];
 
-    // Helper to normalize paths for comparison
+    // Helper to normalize paths for comparison. The previous regex had one
+    // extra `\\` group so the `?` became a quantifier and `\\?\` was never
+    // stripped — every key ended up with `//?/` baked in, file parents
+    // couldn't find their dir entry, and the whole tree fell to the root.
     const normalizePath = (path: string) => {
       return path
-        .replace(/^\\\\\\?\\/, '') // strip Windows long-path prefix
+        .replace(/^\\\\\?\\/, '')   // strip Windows long-path prefix \\?\
         .replace(/\\/g, '/')
         .replace(/^\.\//, '')
-        .replace(/^\//, '')
+        .replace(/^\/+/, '')         // strip all leading slashes
+        .replace(/\/+/g, '/')        // collapse repeated slashes
         .toLowerCase();
     };
 const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
@@ -91,6 +96,7 @@ const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
           type: 'file',
           path: normalizedPath,
           language: file.language,
+          project_id: file.project_id,
           symbols: []
         };
       }
@@ -113,25 +119,39 @@ const normalizeKind = (kind?: string) => (kind ? kind.toLowerCase() : '');
       }
     });
 
-    // Build hierarchy
+    // Build hierarchy. A node attaches to the nearest ancestor we actually
+    // indexed; if no ancestor exists (e.g. the project root wasn't indexed
+    // as a directory), the node falls to the root of the tree.
     Object.values(pathMap).forEach(node => {
       const pathParts = node.path.split('/').filter(Boolean);
-      if (pathParts.length === 1) {
-        // Root level
+      if (pathParts.length <= 1) {
         rootNodes.push(node);
-      } else {
-        // Find parent
-        const parentPath = pathParts.slice(0, -1).join('/');
+        return;
+      }
+      let attached = false;
+      for (let i = pathParts.length - 1; i > 0; i--) {
+        const parentPath = pathParts.slice(0, i).join('/');
         const parent = pathMap[parentPath];
-        if (parent && parent.children) {
+        if (parent && parent.type === 'folder' && parent.children) {
           parent.children.push(node);
-        } else {
-          // No parent found, add to root
-          console.warn('No parent found for:', node.path, 'expected parent:', parentPath);
-          rootNodes.push(node);
+          attached = true;
+          break;
         }
       }
+      if (!attached) rootNodes.push(node);
     });
+
+    // Sort: folders first, then files, both alphabetical.
+    const sortChildren = (nodes: FileNode[]) => {
+      nodes.sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      nodes.forEach(n => {
+        if (n.children && n.children.length) sortChildren(n.children);
+      });
+    };
+    sortChildren(rootNodes);
 
     console.log('Built file tree with', rootNodes.length, 'root nodes');
     return rootNodes;
